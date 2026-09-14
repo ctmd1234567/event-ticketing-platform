@@ -4,6 +4,23 @@
 
 This document defines the target business model for the event trading platform. It is the source of truth for module ownership, aggregate boundaries, terminology, and business invariants. Database migrations and application code must follow this model unless an Architecture Decision Record explicitly changes it.
 
+## Frozen V1 Boundary
+
+- One order contains one ticket tier and exactly one ticket. The only currency is `CNY`, and money uses integer fen.
+- Capacity cannot change after publication. Inventory is `available + reserved + allocated = capacity`, and every counter is nonnegative.
+- A separate `InventoryReservation` record is the reservation fact; order status does not duplicate reservation state.
+- The V1 purchase limit is one order per user and ticket tier. A retry with the same idempotency key returns the original result; a different key is rejected, including after cancellation.
+- V1 has no user-initiated refund. A late confirmed charge after local closure creates one full compensating refund and never changes inventory again. V2 may add user-initiated full refunds, which also do not return allocated inventory to sale. Partial refunds are out of scope.
+- Core ordering is synchronous. RabbitMQ is retained for non-core notification work and is not required to commit an order.
+
+## V1 Local Transaction Boundaries
+
+1. Place order: lock and validate the ticket tier, move one unit from `available` to `reserved`, create the order, and create its `RESERVED` reservation in one MySQL transaction.
+2. Close order: conditionally move a `PENDING_PAYMENT` order to `CLOSED`, move its reservation from `RESERVED` to `RELEASED`, and return one unit from `reserved` to `available` in one MySQL transaction.
+3. Confirm normal payment: persist the trusted payment result, conditionally move the order to `PAID`, move its reservation from `RESERVED` to `CONFIRMED`, and move one unit from `reserved` to `allocated` in one MySQL transaction.
+
+When an Outbox event is introduced for one of these changes, its publication intent is inserted in that same transaction. Gateway charge/refund execution remains outside these local database transactions; a transport timeout is `UNKNOWN`, never proof of failure.
+
 ## Architecture Style
 
 The application remains a modular monolith. Modules communicate through application services and domain events while sharing one MySQL database. Redis is an acceleration and traffic-control layer, not a transactional source of truth. RabbitMQ provides asynchronous delivery, and the Transactional Outbox guarantees that business changes and outgoing events are committed together.
@@ -81,15 +98,15 @@ Rules:
 
 Inventory is the MySQL source of truth for one ticket tier.
 
-Key fields: `ticketTierId`, `totalQuantity`, `reservedQuantity`, `soldQuantity`, `version`.
+Key fields: `ticketTierId`, `capacity`, `available`, `reserved`, `allocated`, `version`.
 
 Invariant:
 
 ```text
-0 <= reservedQuantity
-0 <= soldQuantity
-reservedQuantity + soldQuantity <= totalQuantity
-availableQuantity = totalQuantity - reservedQuantity - soldQuantity
+0 <= available
+0 <= reserved
+0 <= allocated
+available + reserved + allocated = capacity
 ```
 
 Redis may cache availability or reject obvious overload, but a Redis result must never create or restore authoritative inventory.
@@ -105,8 +122,9 @@ States: `RESERVED`, `CONFIRMED`, `RELEASED`.
 Rules:
 
 - There is at most one reservation per order item.
-- Successful payment changes reserved inventory to confirmed inventory.
-- Cancellation, timeout, or an allowed refund releases inventory exactly once.
+- Successful payment moves inventory from `reserved` to `allocated` exactly once.
+- Cancellation or timeout moves inventory from `reserved` back to `available` exactly once.
+- Neither a normal full refund nor a late-payment compensating refund changes allocated or already released inventory.
 
 ### Order
 
@@ -117,6 +135,8 @@ Key fields: `id`, `orderNumber`, `userId`, `eventId`, `sessionId`, `status`, `to
 Rules:
 
 - `(userId, idempotencyKey)` is unique.
+- An order has exactly one item with quantity `1` in V1.
+- `(userId, ticketTierId)` is unique in V1; cancellation does not restore purchase eligibility.
 - A repeated create request with the same key and payload returns the original order.
 - Reusing a key with a different payload is rejected.
 - Order prices are immutable snapshots.
@@ -137,15 +157,15 @@ Rules:
 
 ### Refund
 
-A refund records one full or partial reversal of a successful payment.
+A refund records one full reversal of a successful payment. V1 creates refunds only for late-payment compensation; V2 may expose a user-initiated full-refund command.
 
 Key fields: `id`, `refundNumber`, `orderId`, `paymentId`, `amount`, `reason`, `status`, `idempotencyKey`, `providerRefundId`, `requestedBy`, `createdAt`, `updatedAt`, `succeededAt`.
 
 Rules:
 
-- Total successful refund amount cannot exceed the successful payment amount.
+- The refund amount equals the successful payment amount; partial refunds are unsupported.
 - `(paymentId, idempotencyKey)` is unique.
-- Inventory release is driven by a durable refund-success event and is idempotent.
+- Refund success never changes inventory in the fixed V1/V2 policy.
 
 ## Supporting Records
 

@@ -8,8 +8,8 @@ services:
     ports: ["127.0.0.1:3307:3306"]
     volumes:
       - mysql-data:/var/lib/mysql
-      - ./src/main/resources/db/event_trading.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
-      - ./src/main/resources/db/security-upgrade.sql:/docker-entrypoint-initdb.d/02-security.sql:ro
+    # Flyway applies versioned schema changes when the application starts.
+    # Historical bootstrap scripts contain DROP TABLE and are never mounted.
     healthcheck:
       test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -p$$MYSQL_ROOT_PASSWORD"]
       interval: 5s

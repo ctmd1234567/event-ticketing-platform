@@ -44,13 +44,18 @@ class SecurityRegressionTest {
         @PutMapping("/shop") String updateShop() { return "updated"; }
         @PostMapping("/voucher/seckill") String voucher() { return "created"; }
         @GetMapping("/user/me") Long me() { return UserHolder.getUser().getId(); }
+        @GetMapping("/api/v1/events") String events() { return "events"; }
+        @PostMapping("/api/v1/admin/events") String createEvent() { return "created"; }
     }
     @Test void publicReadsAndAdminOnlyWrites() throws Exception {
         mvc.perform(get("/shop/1")).andExpect(status().isOk());
+        mvc.perform(get("/api/v1/events")).andExpect(status().isOk());
         mvc.perform(post("/shop")).andExpect(status().isUnauthorized());
         mvc.perform(put("/shop").header("authorization",USER)).andExpect(status().isForbidden());
         mvc.perform(post("/voucher/seckill").header("authorization",USER)).andExpect(status().isForbidden());
+        mvc.perform(post("/api/v1/admin/events").header("authorization",USER)).andExpect(status().isForbidden());
         mvc.perform(post("/shop").header("authorization","Bearer "+ADMIN)).andExpect(status().isOk());
+        mvc.perform(post("/api/v1/admin/events").header("authorization","Bearer "+ADMIN)).andExpect(status().isOk());
     }
     @Test void reusedRequestThreadNeverInheritsIdentity() throws Exception {
         mvc.perform(get("/user/me").header("authorization",USER)).andExpect(status().isOk()).andExpect(content().string("2"));

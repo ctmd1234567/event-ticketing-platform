@@ -26,7 +26,9 @@ public class SecurityConfig {
             .authorizeHttpRequests(a -> a
                 .requestMatchers(HttpMethod.POST, "/user/login", "/user/code").permitAll()
                 .requestMatchers(HttpMethod.GET, "/actuator/health", "/actuator/prometheus").permitAll()
+                .requestMatchers(HttpMethod.GET, "/api/v1/events/**", "/api/v1/sessions/*/ticket-tiers").permitAll()
                 .requestMatchers(HttpMethod.GET, "/shop/**", "/shop-type/**", "/voucher/list/**", "/blog/hot", "/upload/images/**").permitAll()
+                .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
                 .requestMatchers("/shop", "/shop/**", "/voucher", "/voucher/**", "/shop-type", "/shop-type/**").hasRole("ADMIN")
                 .anyRequest().authenticated())
             .exceptionHandling(e -> e

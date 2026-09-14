@@ -59,6 +59,15 @@ spring:
           initial-interval: 1s
           max-attempts: 3
           multiplier: 2
+  flyway:
+    enabled: ${FLYWAY_ENABLED:true}
+    locations: classpath:db/migration
+    validate-on-migrate: true
+    # Existing local databases were created by the archived bootstrap/upgrade scripts.
+    # Adopt that schema at version 2, then apply the event-catalog migration.
+    baseline-on-migrate: true
+    baseline-version: 2
+    clean-disabled: true
   servlet:
     multipart:
       max-file-size: 2MB

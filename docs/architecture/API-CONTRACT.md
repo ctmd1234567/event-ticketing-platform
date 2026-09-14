@@ -1,5 +1,7 @@
 # API Contract
 
+The catalog endpoints and synchronous create/list/get order endpoints below are the current V1 baseline. Cancel, payment, refund, notification, and operations endpoints describe later checklist increments and must not be treated as implemented until their corresponding tests pass.
+
 ## Conventions
 
 - Base path: `/api/v1`
@@ -84,17 +86,15 @@ Availability is informational; a query never reserves inventory.
 
 ## Administrative Event API
 
-All endpoints require `ADMIN` and create audit records.
+All currently implemented endpoints require `ADMIN`. Audit records, draft editing, and sale resumption are later increments and are not claimed by the current baseline.
 
 | Method | Path | Purpose |
 |---|---|---|
 | `POST` | `/api/v1/admin/events` | Create a draft event |
-| `PUT` | `/api/v1/admin/events/{eventId}` | Update a draft event |
 | `POST` | `/api/v1/admin/events/{eventId}/sessions` | Add a session |
 | `POST` | `/api/v1/admin/sessions/{sessionId}/ticket-tiers` | Add a ticket tier and inventory |
 | `POST` | `/api/v1/admin/events/{eventId}/publish` | Publish an event |
 | `POST` | `/api/v1/admin/events/{eventId}/take-off-sale` | Stop new sales |
-| `POST` | `/api/v1/admin/events/{eventId}/resume-sale` | Resume sales |
 
 State changes are explicit commands, not unrestricted status updates.
 
@@ -105,7 +105,7 @@ State changes are explicit commands, not unrestricted status updates.
 | `POST` | `/api/v1/orders` | Reserve inventory and create an order |
 | `GET` | `/api/v1/orders/{orderId}` | Get an owned order |
 | `GET` | `/api/v1/orders` | List the current user's orders |
-| `POST` | `/api/v1/orders/{orderId}/cancel` | Cancel an unpaid order |
+| `POST` | `/api/v1/orders/{orderId}/cancel` | Later increment: cancel an unpaid order |
 
 Create-order request:
 
@@ -116,20 +116,28 @@ Create-order request:
 }
 ```
 
+V1 accepts only `quantity: 1` and `currency: CNY`. The server reads the price and currency from the ticket tier and stores an immutable snapshot; client-supplied price is rejected or ignored by contract.
+
 The response contains the immutable price snapshot, state, payment deadline, and order number. It never promises payment success.
 
 ## Payment and Refund API
+
+The following endpoints are target contracts and are not part of the current V1 baseline.
 
 | Method | Path | Purpose |
 |---|---|---|
 | `POST` | `/api/v1/orders/{orderId}/payments` | Create a payment attempt |
 | `POST` | `/api/v1/payment-callbacks/{provider}` | Receive a signed callback |
-| `POST` | `/api/v1/orders/{orderId}/refunds` | Request an allowed refund |
+| `POST` | `/api/v1/orders/{orderId}/refunds` | Request a V2 full refund; unavailable in V1 |
 | `GET` | `/api/v1/refunds/{refundId}` | Get refund status |
 
 Provider callbacks use provider-specific signatures and never use user bearer tokens.
 
+The target V1 payment increment creates a full compensating refund when a trusted late payment succeeds after the order is already `CLOSED`; this behavior is not implemented by the current order baseline. Both compensation and later V2 user refunds will reuse one payment/refund business number across queries and retries. Partial refunds are unsupported, and refund success never restores inventory.
+
 ## Notification API
+
+The following endpoints are target contracts and are not part of the current V1 baseline.
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -139,6 +147,8 @@ Provider callbacks use provider-specific signatures and never use user bearer to
 SSE events include `id`, `type`, `occurredAt`, `aggregateId`, and versioned payload. Reconnecting clients send `Last-Event-ID`; duplicate IDs are safe.
 
 ## Operations API
+
+The following endpoints are target contracts and are not part of the current V1 baseline.
 
 All endpoints require `ADMIN` and append an audit record.
 

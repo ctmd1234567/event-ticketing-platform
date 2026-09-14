@@ -1,20 +1,25 @@
-# High-Concurrency Real-Time Event Trading Platform
+# High-Concurrency Event Trading Platform
 
 [Chinese](README.md) | [English](README.en.md)
 
-A high-concurrency transaction backend built with Java 21, Spring Boot, MySQL, Redis, and RabbitMQ. Limited-time purchasing is the core scenario, with emphasis on inventory correctness, request idempotency, admission control, reliable messaging, and asynchronous order consistency.
+A modular-monolith transaction backend built with Java 21, Spring Boot, MySQL, Redis, and RabbitMQ. The V1 event path creates an order and reserves ticket-tier inventory synchronously; the original voucher and Outbox/RabbitMQ path remains as a compatibility capability.
+
+## Current Implementation Scope
+
+The current baseline implements event, session, and ticket-tier creation, publication, and queries, plus synchronous owned-order creation with a server-side price snapshot and inventory reservation. Payment gateways, refunds, cancellation, timeout closure, and the complete reservation release lifecycle are not implemented; their architecture contracts are later targets rather than current capabilities.
 
 ## Highlights
 
 - **MySQL transaction source of truth:** sixteen inventory buckets spread writes for one voucher, while conditional updates and unique constraints prevent overselling and duplicate orders; Redis does not store final transaction state.
+- **V1 event-trading baseline:** an event contains multiple sessions and ticket tiers; one order buys one ticket, snapshots the server-side price, and commits the order and `RESERVED` record in one MySQL transaction.
 - **Short transactions and overload protection:** idempotency reads occur outside the transaction, while a fair semaphore bounds in-flight database work and returns `429` quickly under overload.
-- **Reliable asynchronous orders:** stock reservation, request creation, and the Outbox event commit in one database transaction.
-- **Eventual message consistency:** leased Outbox batches, RabbitMQ confirms, persistent messages, transactional batch consumption, a failure queue, and automatic retries cover failure paths.
+- **Transactional publishing intent:** inventory deduction, request creation, and the Outbox event commit in one database transaction; a consumer creates the final order.
+- **Asynchronous messaging:** leased Outbox batches, Confirm/Return checks, persistent messages, transactional batch consumption, a failure queue, and scheduled redelivery are implemented; these mechanisms do not establish that every failure scenario has been tested.
 - **Idempotent requests:** repeating the same purchase returns the original request ID without deducting stock again.
 - **Layered admission control:** one Redis `TIME`-based Lua token-bucket call enforces per-user, per-voucher, and global request limits.
 - **Observability:** a dedicated management port exposes Prometheus metrics for the connection pool, reservation latency, completion lag, admission rejection, and Outbox backlog.
 - **Security boundaries:** token authentication, administrator authorization, atomic code consumption, rate limiting, and request identity cleanup.
-- **Automated verification:** 26 default tests, real-infrastructure integration tests, and reproducible k6 write-path load tests.
+- **Automated verification:** the current worktree passes 33 default tests and two isolated integration tests covering Flyway, real MySQL, Redis, RabbitMQ, and 1,000-request inventory contention.
 
 ## Technology Stack
 
@@ -24,7 +29,7 @@ A high-concurrency transaction backend built with Java 21, Spring Boot, MySQL, R
 - Maven and Docker Compose
 - JUnit 5, H2, Mockito, Testcontainers, and k6
 
-## Core Order Workflow
+## Compatibility Voucher Workflow
 
 ```mermaid
 flowchart TD
@@ -46,7 +51,9 @@ flowchart TD
   L -- Retries exhausted --> P[Failure queue]
 ```
 
-Broker Confirm proves only that RabbitMQ accepted the message. The database Outbox event becomes complete after the consumer transaction succeeds, so duplicate delivery does not create duplicate orders.
+The publisher checks both Confirm ACK and Return. A confirm does not prove successful consumer processing or, by itself, routing to the intended queue. The consumer commits request state, final orders, and Outbox completion in one local transaction; the Spring listener container acknowledges afterward. Business uniqueness constraints and request state protect against duplicate delivery.
+
+The current Outbox `completed` flag means consumer processing completed, not merely successful publication. Events can be republished after lease expiry even after broker confirmation, until the consumer commits. Moving a consumer message to the failure queue does not automatically stop scheduled database publication. This is not an end-to-end bounded-retry or complete DLQ-redrive guarantee.
 
 ## Implemented Features
 
@@ -60,6 +67,10 @@ Broker Confirm proves only that RabbitMQ accepted the message. The database Outb
 
 ### Transactions and consistency
 
+- Minimal event, session, and ticket-tier creation, publication, sale stopping, and public queries.
+- Synchronous event-order creation with a server-side CNY-fen price snapshot and separate reservation record.
+- Replay of the original order for one user and idempotency key, plus a one-order-per-user-and-tier limit.
+- Authenticated ownership filters for order details and lists; another user's lookup returns not found.
 - Vouchers and limited-time purchases.
 - Conditional database inventory deduction.
 - Sixteen MySQL inventory buckets per voucher to spread row-lock contention.
@@ -71,7 +82,9 @@ Broker Confirm proves only that RabbitMQ accepted the message. The database Outb
 - RabbitMQ persistence, Confirm, Return, concurrent consumption, retries, and failure queue.
 - Prometheus metrics for orders, the connection pool, and Outbox state.
 
-### Cache and business features
+### Existing compatibility features
+
+The repository also contains the following shop and social endpoints. Their presence does not establish a complete event-trading domain:
 
 - Shop caching, null caching, and logical expiration.
 - Shop category queries.
@@ -115,6 +128,8 @@ docker compose ps
 
 Default ports: MySQL `3307`, Redis `6380`, RabbitMQ `5673`, and RabbitMQ management UI `15673`.
 
+On application startup, Flyway applies `V1` through `V4` in order to a new empty database. An existing local database may be baselined at version `2` only after confirming that it already contains the historical base tables and the order/Outbox upgrade; `V3` and `V4` are then applied, and Flyway clean is disabled. Test seed data exists only under `src/test/resources` and is never loaded into the development database.
+
 ### 3. Start the application
 
 ```powershell
@@ -132,13 +147,15 @@ Default tests do not connect to a personal database:
 mvn test
 ```
 
-Current default result: **26 tests passed, 0 failed**.
+Rerun on 2026-09-14 with the Microsoft OpenJDK 21.0.7 configured by the IDEA project: **33 tests passed, 0 failed**.
 
 Run isolated integration tests against real MySQL, Redis, and RabbitMQ services:
 
 ```powershell
 mvn -Pinfrastructure verify
 ```
+
+The isolated integration result on the same date is **2 tests passed, 0 failed**. It verifies ordered Flyway `V1` through `V4` migration on an empty MySQL 8.4 database plus real-MySQL event ordering, Redis, RabbitMQ, and 1,000 valid requests contending for 100 tickets: 100 reservations succeeded, 900 were business rejections, and none failed technically, with inventory and reservation conservation verified. Flyway 11.7.2 warns that its database recognition table has not certified MySQL 8.4; the migrations and assertions pass, but the compatibility warning remains a known limitation.
 
 ## Load Testing
 
@@ -154,7 +171,9 @@ k6 run .\loadtest\order-capacity.js
 
 Capacity runs start the application with temporary per-voucher and global limits of `5000`, so protective limits do not hide the system boundary; normal defaults remain `420/s` per voucher and `800/s` globally. Local single-instance environment: Windows 11, Java 21, Docker MySQL 8.4, Redis 7.4, RabbitMQ 4.1, and k6 v2.2.0. Each request calls the authenticated write endpoint with a distinct synthetic user while RabbitMQ consumers run concurrently. Post-run checks cover inventory, request rows, final orders, duplicate orders, and Outbox backlog.
 
-Verified 10-second fixed-arrival-rate results:
+Previously recorded 10-second fixed-arrival-rate results (not rerun for this documentation update):
+
+P95 below measures the purchase HTTP request, not asynchronous order completion or payment latency. Final orders and Outbox state are checked separately after request acceptance. Each result is limited to the stated experimental conditions.
 
 - 1000 target RPS: P95 34.69 ms; 10,001 requests and final orders; zero rejection, errors, dropped iterations, duplicate orders, or Outbox backlog.
 - 1200 target RPS: P95 12.77 ms; 12,001 requests and final orders; zero rejection, errors, dropped iterations, duplicate orders, or Outbox backlog.
@@ -162,7 +181,7 @@ Verified 10-second fixed-arrival-rate results:
 - 1500 target RPS: P95 14.82 ms; 15,001 requests and final orders; zero rejection, errors, dropped iterations, duplicate orders, or Outbox backlog.
 - 1600 target RPS: P95 109.13 ms; 15,848 of 16,001 requests accepted and 153 received a controlled `429`; no unexpected responses or dropped iterations; every accepted request became one order, with no duplicates or Outbox backlog.
 
-With strict criteria of P95 below one second, zero `429` responses, zero unexpected responses or dropped iterations, no overselling or duplicate orders, and a fully drained Outbox, the demonstrated warm-service level is 1500 target RPS and the failure boundary is between 1500 and 1600 target RPS. This is a 10-second local single-instance baseline, not a production SLA or a 10–30 minute soak result.
+With strict criteria of P95 below one second, zero `429` responses, zero unexpected responses or dropped iterations, no overselling or duplicate orders, and a fully drained Outbox, the highest passing recorded level is 1500 target RPS. The 1600 level produced controlled rejections and failed those criteria. This is a 10-second local single-instance baseline, not an exact maximum capacity, production SLA, payment/refund throughput, or long-running stability result.
 
 ## Project Layout
 
@@ -190,13 +209,15 @@ event-trading-platform/
 
 - MySQL is the final source of truth for inventory and orders; Redis provides caching, sessions, and admission control.
 - Inventory for one voucher is spread across sixteen MySQL row buckets and summed on reads; existing databases migrate through `db/performance-upgrade.sql`.
-- The purchase endpoint returns a request ID; the RabbitMQ consumer creates the final order asynchronously.
+- The legacy purchase endpoint returns a request ID and RabbitMQ creates the final voucher order asynchronously; `/api/v1/orders` creates the event order synchronously in a local transaction.
 - Management port `127.0.0.1:8082` exposes only health and Prometheus endpoints.
 - The local Compose stack is for development and verification, not a production deployment environment.
 
 ## Documentation
 
+The architecture documents include target designs and should be distinguished from the current implementation scope above.
+
 - [Security and consistency](docs/SECURITY-FIXES.md)
-- [Domain model](docs/architecture/DOMAIN-MODEL.md)
-- [Business state machines](docs/architecture/STATE-MACHINES.md)
-- [API contract](docs/architecture/API-CONTRACT.md)
+- [Domain model design](docs/architecture/DOMAIN-MODEL.md)
+- [Business state machine design](docs/architecture/STATE-MACHINES.md)
+- [API contract design](docs/architecture/API-CONTRACT.md)

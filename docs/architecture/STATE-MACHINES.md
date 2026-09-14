@@ -31,8 +31,7 @@ stateDiagram-v2
 stateDiagram-v2
     [*] --> PENDING_PAYMENT: inventory reserved
     PENDING_PAYMENT --> PAID: valid payment succeeds
-    PENDING_PAYMENT --> CANCELED: user cancels
-    PENDING_PAYMENT --> EXPIRED: deadline wins
+    PENDING_PAYMENT --> CLOSED: user cancel or deadline wins
     PAID --> FULFILLED: entitlement issued
     PAID --> REFUNDING: refund accepted
     FULFILLED --> REFUNDING: refund accepted
@@ -45,11 +44,11 @@ Rules:
 
 - `PENDING_PAYMENT` owns a `RESERVED` inventory reservation.
 - `PAID` and `FULFILLED` own a `CONFIRMED` reservation.
-- `CANCELED` and `EXPIRED` own a `RELEASED` reservation.
-- A late payment for `CANCELED` or `EXPIRED` never reopens the order. It creates a compensating refund and a reconciliation record.
+- `CLOSED` owns a `RELEASED` reservation; `closeReason` distinguishes cancellation from expiration.
+- A late payment for `CLOSED` never reopens the order. It creates one compensating full refund and a visible recovery record.
 - Timeout and payment processing compete on the same guarded transition; exactly one wins.
 - A refund failure returns the order to the state captured when the refund started.
-- `CANCELED`, `EXPIRED`, and `REFUNDED` are terminal.
+- `CLOSED` and `REFUNDED` are terminal.
 
 ## Payment
 
@@ -58,6 +57,10 @@ stateDiagram-v2
     [*] --> CREATED
     CREATED --> PROCESSING: provider request accepted
     CREATED --> CLOSED: order canceled
+    PROCESSING --> UNKNOWN: timeout or response lost
+    UNKNOWN --> PROCESSING: same payment number retry or query
+    UNKNOWN --> SUCCEEDED: trusted query or callback
+    UNKNOWN --> FAILED: trusted query or callback
     PROCESSING --> SUCCEEDED: signed success callback
     PROCESSING --> FAILED: signed failure callback
     PROCESSING --> CLOSED: provider close confirmed
@@ -70,6 +73,7 @@ Rules:
 - Duplicate callbacks with the same provider transaction and payload are acknowledged without repeated effects.
 - Conflicting amount, currency, order, or payload is rejected and audited.
 - Unknown callbacks are stored for reconciliation instead of discarded.
+- Transport timeout, HTTP 500, or connection reset produces `UNKNOWN`, not `FAILED`.
 - Payment success updates payment, order, reservation, history, and Outbox records atomically.
 
 ## Refund
@@ -87,8 +91,8 @@ Rules:
 
 - `SUCCEEDED` is terminal.
 - Duplicate requests return the refund identified by `(paymentId, idempotencyKey)`.
-- Success transitions the order to `REFUNDED` and emits `RefundSucceeded` in one transaction.
-- Inventory release cannot increase available inventory more than once.
+- User full-refund success transitions a paid order to `REFUNDED`; late-payment compensation leaves the order `CLOSED`.
+- Refund success does not change inventory: normal paid inventory remains allocated, while a closed order was already released.
 - Automatic retries are bounded; exhausted failures require an audited operator action.
 
 ## Inventory Reservation
@@ -98,12 +102,12 @@ stateDiagram-v2
     [*] --> RESERVED
     RESERVED --> CONFIRMED: payment succeeds
     RESERVED --> RELEASED: order canceled or expires
-    CONFIRMED --> RELEASED: refund policy releases inventory
 ```
 
 - Every transition is guarded by the previous state.
 - Releasing an already released reservation is a no-op.
 - Inventory counters and reservation state change in one transaction.
+- `CONFIRMED` is represented by allocated inventory and is never returned to sale by refund.
 - Reconciliation calculates expected counters from reservations and reports discrepancies before repair.
 
 ## Race Resolution
