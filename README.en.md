@@ -6,7 +6,7 @@ A modular-monolith transaction backend built with Java 21, Spring Boot, MySQL, R
 
 ## Current Implementation Scope
 
-The current baseline implements event, session, and ticket-tier creation, publication, and queries, plus synchronous owned-order creation with a server-side price snapshot and inventory reservation. Payment gateways, refunds, cancellation, timeout closure, and the complete reservation release lifecycle are not implemented; their architecture contracts are later targets rather than current capabilities.
+The current baseline implements event, session, and ticket-tier creation, publication, and queries; synchronous owned-order creation with a server-side price snapshot and inventory reservation; unpaid-order cancellation; database-driven timeout closure; idempotent inventory release; and restart recovery scans. Payment gateways, refunds, unknown payment outcomes, and late-payment compensation remain later targets.
 
 ## Highlights
 
@@ -19,7 +19,7 @@ The current baseline implements event, session, and ticket-tier creation, public
 - **Layered admission control:** one Redis `TIME`-based Lua token-bucket call enforces per-user, per-voucher, and global request limits.
 - **Observability:** a dedicated management port exposes Prometheus metrics for the connection pool, reservation latency, completion lag, admission rejection, and Outbox backlog.
 - **Security boundaries:** token authentication, administrator authorization, atomic code consumption, rate limiting, and request identity cleanup.
-- **Automated verification:** the current worktree passes 33 default tests and two isolated integration tests covering Flyway, real MySQL, Redis, RabbitMQ, and 1,000-request inventory contention.
+- **Automated verification:** the current worktree passes 38 default tests; two existing isolated integration tests cover Flyway, real MySQL, Redis, RabbitMQ, and 1,000-request inventory contention, while two real-MySQL lifecycle tests cover the 30-second timeout, cancel/close and create/close races, inventory conservation, and restart recovery.
 
 ## Technology Stack
 
@@ -128,7 +128,7 @@ docker compose ps
 
 Default ports: MySQL `3307`, Redis `6380`, RabbitMQ `5673`, and RabbitMQ management UI `15673`.
 
-On application startup, Flyway applies `V1` through `V4` in order to a new empty database. An existing local database may be baselined at version `2` only after confirming that it already contains the historical base tables and the order/Outbox upgrade; `V3` and `V4` are then applied, and Flyway clean is disabled. Test seed data exists only under `src/test/resources` and is never loaded into the development database.
+On application startup, Flyway applies `V1` through `V5` in order to a new empty database. An existing local database may be baselined at version `2` only after confirming that it already contains the historical base tables and the order/Outbox upgrade; `V3`, `V4`, and `V5` are then applied, and Flyway clean is disabled. Test seed data exists only under `src/test/resources` and is never loaded into the development database.
 
 ### 3. Start the application
 
@@ -147,7 +147,7 @@ Default tests do not connect to a personal database:
 mvn test
 ```
 
-Rerun on 2026-09-14 with the Microsoft OpenJDK 21.0.7 configured by the IDEA project: **33 tests passed, 0 failed**.
+Rerun on 2026-09-15 with the Microsoft OpenJDK 21.0.7 configured by the IDEA project and Maven 3.9.16: **38 tests passed, 0 failed, 0 errors, 0 skipped**.
 
 Run isolated integration tests against real MySQL, Redis, and RabbitMQ services:
 
@@ -155,7 +155,7 @@ Run isolated integration tests against real MySQL, Redis, and RabbitMQ services:
 mvn -Pinfrastructure verify
 ```
 
-The isolated integration result on the same date is **2 tests passed, 0 failed**. It verifies ordered Flyway `V1` through `V4` migration on an empty MySQL 8.4 database plus real-MySQL event ordering, Redis, RabbitMQ, and 1,000 valid requests contending for 100 tickets: 100 reservations succeeded, 900 were business rejections, and none failed technically, with inventory and reservation conservation verified. Flyway 11.7.2 warns that its database recognition table has not certified MySQL 8.4; the migrations and assertions pass, but the compatibility warning remains a known limitation.
+On the same date, `InfrastructureIT` was run directly by IDEA: **2 tests passed, 0 failed**. It verifies ordered Flyway `V1` through `V5` migration on an empty MySQL 8.4 database plus real-MySQL event ordering, Redis, RabbitMQ, and 1,000 valid requests contending for 100 tickets: 100 reservations succeeded, 900 were business rejections, and none failed technically, with inventory and reservation conservation verified. `EventOrderLifecycleIT` also passed both tests, covering the 30-second TTL, one-second scan, cancel-versus-expiry and same-tier create-versus-close races, inventory release, and restart recovery; four overdue orders were processed about 43 ms after the restarted application became ready. A separate default-suite test verifies that persisted failure backoff does not starve later candidates. Flyway 11.7.2 warns that its database recognition table has not certified MySQL 8.4; the migrations and assertions pass, but the compatibility warning remains a known limitation. Direct IDEA runs do not create Maven Failsafe reports, so these results are evidenced by the test classes' exit code 0 and complete console output.
 
 ## Load Testing
 

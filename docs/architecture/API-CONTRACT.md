@@ -105,7 +105,7 @@ State changes are explicit commands, not unrestricted status updates.
 | `POST` | `/api/v1/orders` | Reserve inventory and create an order |
 | `GET` | `/api/v1/orders/{orderId}` | Get an owned order |
 | `GET` | `/api/v1/orders` | List the current user's orders |
-| `POST` | `/api/v1/orders/{orderId}/cancel` | Later increment: cancel an unpaid order |
+| `POST` | `/api/v1/orders/{orderId}/cancel` | Cancel an owned unpaid order and release its reservation |
 
 Create-order request:
 

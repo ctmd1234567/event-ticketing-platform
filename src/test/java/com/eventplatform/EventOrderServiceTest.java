@@ -45,7 +45,9 @@ class EventOrderServiceTest {
               id BIGINT PRIMARY KEY,order_number VARCHAR(32) UNIQUE,user_id BIGINT,event_id BIGINT,
               session_id BIGINT,ticket_tier_id BIGINT,quantity INT,unit_price BIGINT,total_amount BIGINT,
               currency CHAR(3),status VARCHAR(24),idempotency_key VARCHAR(128),request_hash VARCHAR(160),
-              payment_deadline TIMESTAMP,created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+              payment_deadline TIMESTAMP,close_reason VARCHAR(32),expiry_attempts INT DEFAULT 0,
+              expiry_next_attempt_at TIMESTAMP,expiry_last_error VARCHAR(255),
+              created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
               UNIQUE(user_id,idempotency_key),UNIQUE(user_id,ticket_tier_id))
             """);
         db.execute("""
@@ -54,7 +56,7 @@ class EventOrderServiceTest {
               status VARCHAR(16),created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)
             """);
         catalog = new EventCatalogService(db);
-        orders = new EventOrderService(db, new DataSourceTransactionManager(source));
+        orders = new EventOrderService(db, new DataSourceTransactionManager(source), 900, 30);
     }
 
     @Test
@@ -140,6 +142,109 @@ class EventOrderServiceTest {
                 .containsEntry("available", 2)
                 .containsEntry("reserved", 0)
                 .containsEntry("allocated", 0);
+    }
+
+    @Test
+    void cancelIsOwnedAtomicAndIdempotent() {
+        Fixture fixture = sellableFixture();
+        var order = orders.create(7, "order-key-cancel-001", fixture.firstTierId(), 1);
+
+        assertThatThrownBy(() -> orders.cancel(order.id(), 8))
+                .isInstanceOfSatisfying(ResponseStatusException.class,
+                        error -> assertThat(error.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND));
+
+        var canceled = orders.cancel(order.id(), 7);
+        var repeated = orders.cancel(order.id(), 7);
+
+        assertThat(canceled.status()).isEqualTo("CLOSED");
+        assertThat(canceled.closeReason()).isEqualTo("USER_CANCELED");
+        assertThat(repeated).isEqualTo(canceled);
+        assertThat(db.queryForMap("SELECT capacity,available,reserved,allocated "
+                + "FROM et_ticket_tier WHERE id=?", fixture.firstTierId()))
+                .containsEntry("capacity", 2)
+                .containsEntry("available", 2)
+                .containsEntry("reserved", 0)
+                .containsEntry("allocated", 0);
+        assertThat(db.queryForObject("SELECT COUNT(*) FROM et_inventory_reservation "
+                + "WHERE order_id=? AND status='RELEASED'", Integer.class, order.id())).isOne();
+        assertThat(db.queryForObject("SELECT COUNT(*) FROM et_inventory_reservation "
+                + "WHERE order_id=? AND status='RESERVED'", Integer.class, order.id())).isZero();
+        assertThatThrownBy(() -> orders.create(7, "order-key-cancel-002",
+                fixture.firstTierId(), 1)).isInstanceOfSatisfying(ResponseStatusException.class,
+                        error -> assertThat(error.getStatusCode()).isEqualTo(HttpStatus.CONFLICT));
+    }
+
+    @Test
+    void persistentDeadlineScanClosesOnlyExpiredOrdersOnce() {
+        Fixture fixture = sellableFixture();
+        var order = orders.create(7, "order-key-expiry-001", fixture.firstTierId(), 1);
+
+        assertThat(orders.closeExpiredBatch(10)).isZero();
+        db.update("UPDATE et_order SET payment_deadline=? WHERE id=?",
+                java.sql.Timestamp.from(Instant.now().minusSeconds(1)), order.id());
+
+        assertThat(orders.closeExpiredBatch(10)).isOne();
+        assertThat(orders.closeExpiredBatch(10)).isZero();
+        assertThat(orders.order(order.id(), 7).status()).isEqualTo("CLOSED");
+        assertThat(orders.order(order.id(), 7).closeReason()).isEqualTo("PAYMENT_EXPIRED");
+        assertThat(db.queryForMap("SELECT capacity,available,reserved,allocated "
+                + "FROM et_ticket_tier WHERE id=?", fixture.firstTierId()))
+                .containsEntry("capacity", 2)
+                .containsEntry("available", 2)
+                .containsEntry("reserved", 0)
+                .containsEntry("allocated", 0);
+        assertThat(db.queryForObject("SELECT COUNT(*) FROM et_inventory_reservation "
+                + "WHERE order_id=? AND status='RELEASED'", Integer.class, order.id())).isOne();
+    }
+
+    @Test
+    void failedExpiryIsDeferredWithoutStarvingLaterOrders() {
+        Fixture poisonFixture = sellableFixture();
+        var poison = orders.create(7, "order-key-poison-0001", poisonFixture.firstTierId(), 1);
+        Fixture healthyFixture = sellableFixture();
+        var healthy = orders.create(8, "order-key-healthy-0001", healthyFixture.firstTierId(), 1);
+        db.update("DELETE FROM et_inventory_reservation WHERE order_id=?", poison.id());
+        db.update("UPDATE et_order SET payment_deadline=? WHERE id=?",
+                java.sql.Timestamp.from(Instant.now().minusSeconds(2)), poison.id());
+        db.update("UPDATE et_order SET payment_deadline=? WHERE id=?",
+                java.sql.Timestamp.from(Instant.now().minusSeconds(1)), healthy.id());
+
+        assertThat(orders.closeExpiredBatch(1)).isZero();
+        assertThat(db.queryForMap("SELECT expiry_attempts,expiry_next_attempt_at,expiry_last_error "
+                + "FROM et_order WHERE id=?", poison.id()))
+                .containsEntry("expiry_attempts", 1);
+        assertThat(db.queryForObject("SELECT expiry_next_attempt_at IS NOT NULL FROM et_order WHERE id=?",
+                Boolean.class, poison.id())).isTrue();
+        assertThat(orders.closeExpiredBatch(1)).isOne();
+        assertThat(orders.order(healthy.id(), 8).status()).isEqualTo("CLOSED");
+        assertThat(orders.order(poison.id(), 7).status()).isEqualTo("PENDING_PAYMENT");
+        db.update("UPDATE et_order SET expiry_next_attempt_at=? WHERE id=?",
+                java.sql.Timestamp.from(Instant.now().minusSeconds(1)), poison.id());
+        assertThat(orders.closeExpiredBatch(1)).isZero();
+        assertThat(db.queryForObject("SELECT expiry_attempts FROM et_order WHERE id=?",
+                Integer.class, poison.id())).isEqualTo(2);
+    }
+
+    @Test
+    void paidOrderWinsAgainstCancellationWithoutReleasingInventory() {
+        Fixture fixture = sellableFixture();
+        var order = orders.create(7, "order-key-paid-0001", fixture.firstTierId(), 1);
+        db.update("UPDATE et_order SET status='PAID' WHERE id=?", order.id());
+        db.update("UPDATE et_inventory_reservation SET status='CONFIRMED' WHERE order_id=?", order.id());
+        db.update("UPDATE et_ticket_tier SET reserved=reserved-1,allocated=allocated+1 WHERE id=?",
+                fixture.firstTierId());
+
+        assertThatThrownBy(() -> orders.cancel(order.id(), 7))
+                .isInstanceOfSatisfying(ResponseStatusException.class,
+                        error -> assertThat(error.getStatusCode()).isEqualTo(HttpStatus.CONFLICT));
+        assertThat(db.queryForMap("SELECT capacity,available,reserved,allocated "
+                + "FROM et_ticket_tier WHERE id=?", fixture.firstTierId()))
+                .containsEntry("capacity", 2)
+                .containsEntry("available", 1)
+                .containsEntry("reserved", 0)
+                .containsEntry("allocated", 1);
+        assertThat(db.queryForObject("SELECT status FROM et_inventory_reservation WHERE order_id=?",
+                String.class, order.id())).isEqualTo("CONFIRMED");
     }
 
     private Fixture sellableFixture() {

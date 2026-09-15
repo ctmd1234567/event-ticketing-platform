@@ -38,6 +38,11 @@ public class EventOrderController {
         return Result.ok(orders.orders(actorId()));
     }
 
+    @PostMapping("/{orderId}/cancel")
+    public Result cancel(@PathVariable long orderId) {
+        return Result.ok(orders.cancel(orderId, actorId()));
+    }
+
     private long actorId() {
         return UserHolder.getUser().getId();
     }

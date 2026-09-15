@@ -65,7 +65,7 @@ class InfrastructureIT {
     @DirtiesContext(methodMode = DirtiesContext.MethodMode.AFTER_METHOD)
     @Test void realFlywayMySqlRedisAndBrokerRoundTrip() throws Exception {
         assertThat(flyway.info().applied()).extracting(info -> info.getVersion().getVersion())
-            .containsExactly("1", "2", "3", "4");
+            .containsExactly("1", "2", "3", "4", "5");
         new ResourceDatabasePopulator(new ClassPathResource("db/infrastructure-seed.sql")).execute(source);
         assertThat(catalog.listEvents()).extracting(EventCatalogService.EventView::id).contains(910001L);
         var eventOrder = eventOrders.create(900001, "integration-order-0001", 910001, 1);

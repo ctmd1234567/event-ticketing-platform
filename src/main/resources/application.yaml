@@ -94,6 +94,12 @@ logging:
   level:
     com.eventplatform: info
 app:
+  event-orders:
+    payment-window-seconds: ${EVENT_ORDER_PAYMENT_WINDOW_SECONDS:900}
+    expiry-scan-enabled: ${EVENT_ORDER_EXPIRY_SCAN_ENABLED:true}
+    expiry-scan-interval-ms: ${EVENT_ORDER_EXPIRY_SCAN_INTERVAL_MS:1000}
+    expiry-scan-batch-size: ${EVENT_ORDER_EXPIRY_SCAN_BATCH_SIZE:200}
+    expiry-failure-retry-seconds: ${EVENT_ORDER_EXPIRY_FAILURE_RETRY_SECONDS:30}
   security:
     admin-user-ids: ${ADMIN_USER_IDS:}
     session-ttl-seconds: ${SESSION_TTL_SECONDS:1800}

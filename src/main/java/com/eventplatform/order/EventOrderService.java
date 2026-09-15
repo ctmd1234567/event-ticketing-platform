@@ -2,6 +2,9 @@ package com.eventplatform.order;
 
 import com.baomidou.mybatisplus.core.toolkit.IdWorker;
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.http.HttpStatus;
@@ -21,14 +24,22 @@ import java.util.List;
 
 @Service
 public class EventOrderService {
-    private static final Duration PAYMENT_WINDOW = Duration.ofMinutes(15);
+    private static final Logger log = LoggerFactory.getLogger(EventOrderService.class);
+    private static final String USER_CANCELED = "USER_CANCELED";
+    private static final String PAYMENT_EXPIRED = "PAYMENT_EXPIRED";
 
     private final JdbcTemplate db;
     private final TransactionTemplate transactions;
+    private final Duration paymentWindow;
+    private final Duration expiryFailureRetry;
 
-    public EventOrderService(JdbcTemplate db, PlatformTransactionManager transactionManager) {
+    public EventOrderService(JdbcTemplate db, PlatformTransactionManager transactionManager,
+            @Value("${app.event-orders.payment-window-seconds:900}") long paymentWindowSeconds,
+            @Value("${app.event-orders.expiry-failure-retry-seconds:30}") long expiryFailureRetrySeconds) {
         this.db = db;
         this.transactions = new TransactionTemplate(transactionManager);
+        this.paymentWindow = Duration.ofSeconds(Math.max(1, paymentWindowSeconds));
+        this.expiryFailureRetry = Duration.ofSeconds(Math.max(1, expiryFailureRetrySeconds));
     }
 
     public OrderView create(long userId, String idempotencyKey, long ticketTierId, int quantity) {
@@ -90,7 +101,7 @@ public class EventOrderService {
         long orderId = IdWorker.getId();
         String orderNumber = "EO" + orderId;
         long totalAmount = Math.multiplyExact(tier.unitPrice(), quantity);
-        Instant paymentDeadline = min(now.plus(PAYMENT_WINDOW), tier.salesEndAt());
+        Instant paymentDeadline = min(now.plus(paymentWindow), tier.salesEndAt());
         db.update("""
             INSERT INTO et_order(
                 id,order_number,user_id,event_id,session_id,ticket_tier_id,quantity,
@@ -112,7 +123,7 @@ public class EventOrderService {
             return db.queryForObject("""
                 SELECT id,order_number,user_id,event_id,session_id,ticket_tier_id,quantity,
                        unit_price,total_amount,currency,status,idempotency_key,request_hash,
-                       payment_deadline,created_at
+                       payment_deadline,close_reason,created_at
                 FROM et_order WHERE id=? AND user_id=?
                 """, (rs, row) -> mapOrder(rs), orderId, userId);
         } catch (EmptyResultDataAccessException missing) {
@@ -125,9 +136,153 @@ public class EventOrderService {
         return db.query("""
             SELECT id,order_number,user_id,event_id,session_id,ticket_tier_id,quantity,
                    unit_price,total_amount,currency,status,idempotency_key,request_hash,
-                   payment_deadline,created_at
+                   payment_deadline,close_reason,created_at
             FROM et_order WHERE user_id=? ORDER BY created_at DESC,id DESC
             """, (rs, row) -> mapOrder(rs), userId);
+    }
+
+    public OrderView cancel(long orderId, long userId) {
+        Boolean closed = transactions.execute(status -> close(orderId, userId, USER_CANCELED, false));
+        if (closed == null) {
+            throw new IllegalStateException("Cancel transaction returned no result");
+        }
+        return order(orderId, userId);
+    }
+
+    public int closeExpiredBatch(int requestedBatchSize) {
+        int batchSize = Math.max(1, Math.min(requestedBatchSize, 1000));
+        List<Long> candidates = db.queryForList("""
+            SELECT id
+            FROM et_order
+            WHERE status='PENDING_PAYMENT' AND payment_deadline<=CURRENT_TIMESTAMP
+              AND (expiry_next_attempt_at IS NULL OR expiry_next_attempt_at<=CURRENT_TIMESTAMP)
+            ORDER BY payment_deadline,id
+            LIMIT
+            """ + batchSize, Long.class);
+        int closed = 0;
+        for (Long orderId : candidates) {
+            try {
+                Boolean changed = transactions.execute(
+                        status -> close(orderId, null, PAYMENT_EXPIRED, true));
+                if (Boolean.TRUE.equals(changed)) {
+                    closed++;
+                }
+            } catch (RuntimeException failure) {
+                log.error("Failed to close expired event order {}", orderId, failure);
+                deferFailedExpiry(orderId, failure);
+            }
+        }
+        return closed;
+    }
+
+    private void deferFailedExpiry(long orderId, RuntimeException failure) {
+        String detail = failure.getClass().getSimpleName();
+        if (failure.getMessage() != null && !failure.getMessage().isBlank()) {
+            detail += ": " + failure.getMessage();
+        }
+        if (detail.length() > 255) {
+            detail = detail.substring(0, 255);
+        }
+        try {
+            db.update("""
+                UPDATE et_order
+                SET expiry_attempts=expiry_attempts+1,
+                    expiry_next_attempt_at=?,expiry_last_error=?
+                WHERE id=? AND status='PENDING_PAYMENT'
+                """, Timestamp.from(databaseNow().plus(expiryFailureRetry)), detail, orderId);
+        } catch (RuntimeException deferFailure) {
+            failure.addSuppressed(deferFailure);
+            log.error("Failed to defer expiry retry for event order {}", orderId, deferFailure);
+        }
+    }
+
+    private boolean close(long orderId, Long expectedUserId, String closeReason, boolean requireExpired) {
+        LockedOrder order = lockOrder(orderId);
+        if (expectedUserId != null && order.userId() != expectedUserId) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Order not found");
+        }
+        if ("CLOSED".equals(order.status())) {
+            return false;
+        }
+        if (!"PENDING_PAYMENT".equals(order.status())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "The order cannot be canceled in its current state");
+        }
+        if (requireExpired && databaseNow().isBefore(order.paymentDeadline())) {
+            return false;
+        }
+
+        LockedReservation reservation = lockReservation(orderId);
+        if (!"RESERVED".equals(reservation.status())
+                || reservation.ticketTierId() != order.ticketTierId()
+                || reservation.quantity() != order.quantity()) {
+            throw new IllegalStateException("Pending order does not own its reserved inventory");
+        }
+        lockTierInventory(order.ticketTierId());
+
+        int orderChanged = db.update("""
+            UPDATE et_order SET status='CLOSED',close_reason=?
+            WHERE id=? AND status='PENDING_PAYMENT'
+            """, closeReason, orderId);
+        int reservationChanged = db.update("""
+            UPDATE et_inventory_reservation SET status='RELEASED'
+            WHERE order_id=? AND status='RESERVED'
+            """, orderId);
+        int inventoryChanged = db.update("""
+            UPDATE et_ticket_tier
+            SET available=available+?,reserved=reserved-?
+            WHERE id=? AND reserved>=?
+            """, order.quantity(), order.quantity(), order.ticketTierId(), order.quantity());
+        if (orderChanged != 1 || reservationChanged != 1 || inventoryChanged != 1) {
+            throw new IllegalStateException("Order close did not atomically release inventory");
+        }
+        assertInventoryConserved(order.ticketTierId());
+        return true;
+    }
+
+    private LockedOrder lockOrder(long orderId) {
+        try {
+            return db.queryForObject("""
+                SELECT id,user_id,ticket_tier_id,quantity,status,payment_deadline
+                FROM et_order WHERE id=? FOR UPDATE
+                """, (rs, row) -> new LockedOrder(rs.getLong("id"), rs.getLong("user_id"),
+                    rs.getLong("ticket_tier_id"), rs.getInt("quantity"), rs.getString("status"),
+                    rs.getTimestamp("payment_deadline").toInstant()), orderId);
+        } catch (EmptyResultDataAccessException missing) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Order not found");
+        }
+    }
+
+    private LockedReservation lockReservation(long orderId) {
+        try {
+            return db.queryForObject("""
+                SELECT ticket_tier_id,quantity,status
+                FROM et_inventory_reservation WHERE order_id=? FOR UPDATE
+                """, (rs, row) -> new LockedReservation(rs.getLong("ticket_tier_id"),
+                    rs.getInt("quantity"), rs.getString("status")), orderId);
+        } catch (EmptyResultDataAccessException missing) {
+            throw new IllegalStateException("Pending order has no inventory reservation", missing);
+        }
+    }
+
+    private void lockTierInventory(long ticketTierId) {
+        try {
+            db.queryForObject("SELECT id FROM et_ticket_tier WHERE id=? FOR UPDATE",
+                    Long.class, ticketTierId);
+        } catch (EmptyResultDataAccessException missing) {
+            throw new IllegalStateException("Reservation ticket tier does not exist", missing);
+        }
+    }
+
+    private void assertInventoryConserved(long ticketTierId) {
+        Integer violations = db.queryForObject("""
+            SELECT COUNT(*) FROM et_ticket_tier
+            WHERE id=? AND (available<0 OR reserved<0 OR allocated<0
+                OR available+reserved+allocated<>capacity)
+            """, Integer.class, ticketTierId);
+        if (violations == null || violations != 0) {
+            throw new IllegalStateException("Ticket inventory conservation was violated");
+        }
     }
 
     private SellableTier lockTier(long ticketTierId) {
@@ -156,7 +311,7 @@ public class EventOrderService {
         List<OrderView> rows = db.query("""
             SELECT id,order_number,user_id,event_id,session_id,ticket_tier_id,quantity,
                    unit_price,total_amount,currency,status,idempotency_key,request_hash,
-                   payment_deadline,created_at
+                   payment_deadline,close_reason,created_at
             FROM et_order WHERE user_id=? AND idempotency_key=?
             """, (rs, row) -> mapOrder(rs), userId, idempotencyKey);
         return rows.isEmpty() ? null : rows.getFirst();
@@ -176,7 +331,7 @@ public class EventOrderService {
                 rs.getInt("quantity"), rs.getLong("unit_price"), rs.getLong("total_amount"),
                 rs.getString("currency"), rs.getString("status"), rs.getString("idempotency_key"),
                 rs.getString("request_hash"), rs.getTimestamp("payment_deadline").toInstant(),
-                rs.getTimestamp("created_at").toInstant());
+                rs.getString("close_reason"), rs.getTimestamp("created_at").toInstant());
     }
 
     private Instant databaseNow() {
@@ -203,9 +358,15 @@ public class EventOrderService {
             Instant salesStartAt, Instant salesEndAt, long unitPrice, String currency,
             int available, String tierStatus) {}
 
+    private record LockedOrder(long id, long userId, long ticketTierId, int quantity, String status,
+            Instant paymentDeadline) {}
+
+    private record LockedReservation(long ticketTierId, int quantity, String status) {}
+
+
     public record OrderView(long id, String orderNumber, long userId, long eventId, long sessionId,
             long ticketTierId, int quantity, long unitPrice, long totalAmount, String currency,
             String status, @JsonIgnore String idempotencyKey, @JsonIgnore String requestHash,
-            Instant paymentDeadline,
+            Instant paymentDeadline, String closeReason,
             Instant createdAt) {}
 }
