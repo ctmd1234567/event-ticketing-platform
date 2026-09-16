@@ -100,6 +100,10 @@ app:
     expiry-scan-interval-ms: ${EVENT_ORDER_EXPIRY_SCAN_INTERVAL_MS:1000}
     expiry-scan-batch-size: ${EVENT_ORDER_EXPIRY_SCAN_BATCH_SIZE:200}
     expiry-failure-retry-seconds: ${EVENT_ORDER_EXPIRY_FAILURE_RETRY_SECONDS:30}
+  simulated-gateway:
+    payment-status: ${SIM_GATEWAY_PAYMENT_STATUS:SUCCEEDED}
+    refund-status: ${SIM_GATEWAY_REFUND_STATUS:SUCCEEDED}
+    fault-after-commit-once: ${SIM_GATEWAY_FAULT_AFTER_COMMIT_ONCE:NONE}
   security:
     admin-user-ids: ${ADMIN_USER_IDS:}
     session-ttl-seconds: ${SESSION_TTL_SECONDS:1800}

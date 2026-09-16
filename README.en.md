@@ -6,7 +6,7 @@ A modular-monolith transaction backend built with Java 21, Spring Boot, MySQL, R
 
 ## Current Implementation Scope
 
-The current baseline implements event, session, and ticket-tier creation, publication, and queries; synchronous owned-order creation with a server-side price snapshot and inventory reservation; unpaid-order cancellation; database-driven timeout closure; idempotent inventory release; and restart recovery scans. Payment gateways, refunds, unknown payment outcomes, and late-payment compensation remain later targets.
+The current baseline implements event, session, and ticket-tier creation, publication, and queries; synchronous owned-order creation with a server-side price snapshot and inventory reservation; unpaid-order cancellation; database-driven timeout closure; idempotent inventory release; and restart recovery scans. The source now includes the V6 payment schema and a persistent simulated gateway with an independent transaction boundary; IDEA/MySQL verification and integration with order payment orchestration are still pending. Local `UNKNOWN` recovery, callbacks, and late-payment compensation remain later increments.
 
 ## Highlights
 
@@ -19,7 +19,7 @@ The current baseline implements event, session, and ticket-tier creation, public
 - **Layered admission control:** one Redis `TIME`-based Lua token-bucket call enforces per-user, per-voucher, and global request limits.
 - **Observability:** a dedicated management port exposes Prometheus metrics for the connection pool, reservation latency, completion lag, admission rejection, and Outbox backlog.
 - **Security boundaries:** token authentication, administrator authorization, atomic code consumption, rate limiting, and request identity cleanup.
-- **Automated verification:** the current worktree passes 38 default tests; two existing isolated integration tests cover Flyway, real MySQL, Redis, RabbitMQ, and 1,000-request inventory contention, while two real-MySQL lifecycle tests cover the 30-second timeout, cancel/close and create/close races, inventory conservation, and restart recovery.
+- **Automated verification:** the last accepted checklist 0–5 baseline passed 38 default tests; two isolated integration tests covered Flyway V1–V5, real MySQL, Redis, RabbitMQ, and 1,000-request inventory contention, while two real-MySQL lifecycle tests covered the 30-second timeout, cancel/close and create/close races, inventory conservation, and restart recovery. The new V6 and simulated-gateway tests still require an IDEA rerun.
 
 ## Technology Stack
 
@@ -128,7 +128,7 @@ docker compose ps
 
 Default ports: MySQL `3307`, Redis `6380`, RabbitMQ `5673`, and RabbitMQ management UI `15673`.
 
-On application startup, Flyway applies `V1` through `V5` in order to a new empty database. An existing local database may be baselined at version `2` only after confirming that it already contains the historical base tables and the order/Outbox upgrade; `V3`, `V4`, and `V5` are then applied, and Flyway clean is disabled. Test seed data exists only under `src/test/resources` and is never loaded into the development database.
+The current source contains Flyway `V1` through `V6`; V6 adds local payment/refund records and independent simulated-gateway result tables, and its real-MySQL migration verification is still pending. An existing local database may be baselined at version `2` only after confirming that it already contains the historical base tables and the order/Outbox upgrade; later migrations are then applied, and Flyway clean is disabled. Test seed data exists only under `src/test/resources` and is never loaded into the development database.
 
 ### 3. Start the application
 
