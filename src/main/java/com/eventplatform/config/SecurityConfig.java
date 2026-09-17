@@ -25,6 +25,7 @@ public class SecurityConfig {
             .requestCache(c -> c.disable()).formLogin(c -> c.disable()).httpBasic(c -> c.disable())
             .authorizeHttpRequests(a -> a
                 .requestMatchers(HttpMethod.POST, "/user/login", "/user/code").permitAll()
+                .requestMatchers(HttpMethod.POST, "/api/v1/payment-callbacks/simulated").permitAll()
                 .requestMatchers(HttpMethod.GET, "/actuator/health", "/actuator/prometheus").permitAll()
                 .requestMatchers(HttpMethod.GET, "/api/v1/events/**", "/api/v1/sessions/*/ticket-tiers").permitAll()
                 .requestMatchers(HttpMethod.GET, "/shop/**", "/shop-type/**", "/voucher/list/**", "/blog/hot", "/upload/images/**").permitAll()

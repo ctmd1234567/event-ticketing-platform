@@ -1,6 +1,9 @@
 # API Contract
 
-The catalog endpoints and synchronous create/list/get order endpoints below are the current V1 baseline. Cancel, payment, refund, notification, and operations endpoints describe later checklist increments and must not be treated as implemented until their corresponding tests pass.
+The current V1 baseline implements catalog and synchronous order endpoints,
+unpaid-order cancellation, and the simulated payment/late-compensation boundary
+listed below. User-created refunds, notifications, and general operations APIs
+remain later increments and must not be treated as implemented.
 
 ## Conventions
 
@@ -62,7 +65,7 @@ These commands require `Idempotency-Key`:
 - Create order
 - Create payment attempt
 - Cancel order
-- Request refund
+- Request a future user-initiated refund (not available in V1)
 - Operator retry or redrive
 
 The server stores actor, endpoint, key, normalized request hash, response status, and resource ID.
@@ -120,20 +123,34 @@ V1 accepts only `quantity: 1` and `currency: CNY`. The server reads the price an
 
 The response contains the immutable price snapshot, state, payment deadline, and order number. It never promises payment success.
 
-## Payment and Refund API
+## Payment and Compensation Refund API
 
-The following endpoints are target contracts and are not part of the current V1 baseline.
+These V1 endpoints are implemented. Refund reads/refreshes expose only an
+existing system-created late-payment compensation; there is no user-facing
+refund-create endpoint.
 
 | Method | Path | Purpose |
 |---|---|---|
 | `POST` | `/api/v1/orders/{orderId}/payments` | Create a payment attempt |
-| `POST` | `/api/v1/payment-callbacks/{provider}` | Receive a signed callback |
-| `POST` | `/api/v1/orders/{orderId}/refunds` | Request a V2 full refund; unavailable in V1 |
+| `GET` | `/api/v1/payments/{paymentId}` | Get owned local payment status |
+| `POST` | `/api/v1/payments/{paymentId}/refresh` | Query the gateway and apply new trusted evidence |
+| `POST` | `/api/v1/payment-callbacks/simulated` | Receive a signed payment/refund callback |
 | `GET` | `/api/v1/refunds/{refundId}` | Get refund status |
+| `POST` | `/api/v1/refunds/{refundId}/refresh` | Query an existing compensation refund |
+| `GET` | `/api/v1/admin/payment-recovery` | List bounded manual payment/refund/callback work |
+| `POST` | `/api/v1/admin/payments/{paymentId}/retry` | Audited, idempotent same-number payment retry |
+| `POST` | `/api/v1/admin/refunds/{refundId}/retry` | Audited, idempotent same-number refund retry |
 
-Provider callbacks use provider-specific signatures and never use user bearer tokens.
+The exact simulated callback POST is the only payment-callback route exempt from
+user bearer authentication. It uses the configured HMAC secret, timestamp, and
+exact raw body. The ADMIN routes require an administrator, `Idempotency-Key`,
+and a bounded nonblank reason for mutations.
 
-The target V1 payment increment creates a full compensating refund when a trusted late payment succeeds after the order is already `CLOSED`; this behavior is not implemented by the current order baseline. Both compensation and later V2 user refunds will reuse one payment/refund business number across queries and retries. Partial refunds are unsupported, and refund success never restores inventory.
+When a trusted late payment succeeds after the order is already `CLOSED`, the
+same local result transaction creates one full compensation intent. Its gateway
+execution and recovery occur later under the original refund number. The order
+stays closed, partial refunds are unsupported, and refund success never restores
+inventory. A later V2 user-refund command is not implemented.
 
 ## Notification API
 

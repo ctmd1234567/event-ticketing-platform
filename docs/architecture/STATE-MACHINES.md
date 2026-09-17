@@ -6,7 +6,9 @@
 - Every transition verifies the current state with a conditional update or row lock.
 - Repeating a completed transition is a no-op that returns the committed result.
 - An invalid transition returns `409 Conflict` with a stable business error code.
-- State, state history, and the outgoing Outbox event change in one transaction.
+- State and its applicable history change in one transaction. Where a transition
+  defines an Outbox event, that event must join the same transaction; item 6 does
+  not yet emit new payment/refund Outbox events.
 - Consumers and callbacks may arrive more than once or out of order.
 
 ## Event
@@ -42,6 +44,8 @@ stateDiagram-v2
 
 Rules:
 
+- Item 6 implements `PENDING_PAYMENT -> PAID` and `PENDING_PAYMENT -> CLOSED`.
+  Fulfillment and user-requested refund order transitions remain later scope.
 - `PENDING_PAYMENT` owns a `RESERVED` inventory reservation.
 - `PAID` and `FULFILLED` own a `CONFIRMED` reservation.
 - `CLOSED` owns a `RELEASED` reservation; `closeReason` distinguishes cancellation from expiration.
@@ -54,17 +58,14 @@ Rules:
 
 ```mermaid
 stateDiagram-v2
-    [*] --> CREATED
-    CREATED --> PROCESSING: provider request accepted
-    CREATED --> CLOSED: order canceled
+    [*] --> PROCESSING: local intent committed
     PROCESSING --> UNKNOWN: timeout or response lost
     UNKNOWN --> PROCESSING: same payment number retry or query
     UNKNOWN --> SUCCEEDED: trusted query or callback
     UNKNOWN --> FAILED: trusted query or callback
     PROCESSING --> SUCCEEDED: signed success callback
     PROCESSING --> FAILED: signed failure callback
-    PROCESSING --> CLOSED: provider close confirmed
-    FAILED --> PROCESSING: new attempt
+    FAILED --> PROCESSING: audited same-number retry
 ```
 
 Rules:
@@ -74,7 +75,8 @@ Rules:
 - Conflicting amount, currency, order, or payload is rejected and audited.
 - Unknown callbacks are stored for reconciliation instead of discarded.
 - Transport timeout, HTTP 500, or connection reset produces `UNKNOWN`, not `FAILED`.
-- Payment success updates payment, order, reservation, history, and Outbox records atomically.
+- Payment success updates payment, order, reservation, inventory, and payment
+  history atomically. Payment/refund Outbox events remain a later increment.
 
 ## Refund
 
@@ -83,17 +85,22 @@ stateDiagram-v2
     [*] --> REQUESTED
     REQUESTED --> PROCESSING: provider request accepted
     PROCESSING --> SUCCEEDED: signed success result
-    PROCESSING --> FAILED: provider rejects or retries exhausted
-    FAILED --> PROCESSING: audited retry
+    PROCESSING --> FAILED: trusted provider rejection
+    UNKNOWN --> FAILED: trusted provider rejection
+    FAILED --> PROCESSING: audited same-number retry
 ```
 
 Rules:
 
 - `SUCCEEDED` is terminal.
-- Duplicate requests return the refund identified by `(paymentId, idempotencyKey)`.
-- User full-refund success transitions a paid order to `REFUNDED`; late-payment compensation leaves the order `CLOSED`.
+- V1 creates at most one late-payment compensation refund per payment; gateway
+  retries reuse its refund number, and operator retry idempotency is audited separately.
+- Late-payment compensation leaves the order `CLOSED`. User-requested full
+  refunds and their order transitions remain V2 scope.
 - Refund success does not change inventory: normal paid inventory remains allocated, while a closed order was already released.
-- Automatic retries are bounded; exhausted failures require an audited operator action.
+- Automatic retries are bounded; exhaustion preserves the current business state
+  and marks `MANUAL_REQUIRED`. Explicit provider failure also requires an audited
+  operator retry. Manual handling is not refund success.
 
 ## Inventory Reservation
 

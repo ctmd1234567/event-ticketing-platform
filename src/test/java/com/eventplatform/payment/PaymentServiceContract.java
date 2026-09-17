@@ -25,6 +25,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -36,31 +37,36 @@ abstract class PaymentServiceContract {
     private GateJdbc db;
     private EventOrderService orders;
     private EventPaymentService payments;
+    private EventRefundService refunds;
     private PaymentCallbackService callbacks;
     private SimulatedPaymentGateway gateway;
     private GatewayResponseFaultInjector faults;
     private TransactionTemplate local;
+    private DataSourceTransactionManager manager;
     private EventOrderService.OrderView order;
+    private EventCatalogService catalog;
+    private long tier;
     private String key;
 
     @BeforeEach
     void fixture() throws Exception {
         DataSource source = source();
         db = new GateJdbc(source);
-        var manager = new DataSourceTransactionManager(source);
+        manager = new DataSourceTransactionManager(source);
         local = new TransactionTemplate(manager);
         orders = new EventOrderService(db, manager, 900, 30);
         faults = new GatewayResponseFaultInjector("NONE");
         gateway = spy(new JdbcSimulatedPaymentGateway(db, manager,
                 new ConfiguredSimulatedGatewayOutcomePolicy("SUCCEEDED", "SUCCEEDED"), faults));
         payments = new EventPaymentService(db, manager, gateway);
-        callbacks = new PaymentCallbackService(db, manager, payments, "callback-test-secret", 300);
-        var catalog = new EventCatalogService(db);
+        refunds = new EventRefundService(db, manager, gateway);
+        callbacks = new PaymentCallbackService(db, manager, payments, refunds, "callback-test-secret", 300);
+        catalog = new EventCatalogService(db);
         Instant now = Instant.now();
         long event = catalog.createEvent(1, "Payment fixture", null, "Test venue");
         long session = catalog.addSession(event, "Main", now.plusSeconds(7200), now.plusSeconds(10800),
                 now.minusSeconds(60), now.plusSeconds(3600));
-        long tier = catalog.addTicketTier(session, "One ticket", 4750, "CNY", 1);
+        tier = catalog.addTicketTier(session, "One ticket", 4750, "CNY", 1);
         catalog.publish(event);
         order = orders.create(7, UUID.randomUUID().toString(), tier, 1);
         key = UUID.randomUUID().toString();
@@ -198,6 +204,23 @@ abstract class PaymentServiceContract {
     }
 
     @Test
+    void expiryWinsBeforeLateGatewaySuccessAndCreatesCompensation() {
+        doAnswer(call -> {
+            Object result = call.callRealMethod();
+            db.update("UPDATE et_order SET payment_deadline=? WHERE id=?",
+                    Timestamp.from(Instant.now().minusSeconds(60)), order.id());
+            assertThat(orders.closeExpiredBatch(100)).isOne();
+            return result;
+        }).when(gateway).createPayment(any());
+        var late = payments.create(order.id(), 7, key);
+        assertThat(late.status()).isEqualTo("SUCCEEDED");
+        assertThat(orders.order(order.id(), 7).status()).isEqualTo("CLOSED");
+        assertThat(orders.order(order.id(), 7).closeReason()).isEqualTo("PAYMENT_EXPIRED");
+        assertThat(db.queryForObject("SELECT COUNT(*) FROM et_refund WHERE payment_id=?", Integer.class, late.id())).isOne();
+        assertInventory(1, 0, 0);
+    }
+
+    @Test
     void concurrentSameKeyReturnsOnePaymentAndDispatchesOnce() throws Exception {
         CountDownLatch dispatched = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
@@ -220,23 +243,237 @@ abstract class PaymentServiceContract {
     }
 
     @Test
-    void closeDuringGatewayCallRetainsChargeForManualHandlingWithoutReallocating() {
+    void closeDuringGatewayCallCreatesAndCompletesOneCompensationWithoutReallocating() {
+        AtomicReference<EventOrderService.OrderView> replacement = new AtomicReference<>();
+        doAnswer(call -> {
+            Object result = call.callRealMethod();
+            orders.cancel(order.id(), 7);
+            replacement.set(orders.create(8, UUID.randomUUID().toString(), tier, 1));
+            return result;
+        }).when(gateway).createPayment(any());
+        var late = payments.create(order.id(), 7, key);
+        assertThat(late.status()).isEqualTo("SUCCEEDED");
+        assertThat(late.recoveryStatus()).isEqualTo("NONE");
+        assertThat(late.lastError()).isNull();
+        assertThat(orders.order(order.id(), 7).status()).isEqualTo("CLOSED");
+        assertThat(db.queryForObject("SELECT status FROM et_inventory_reservation WHERE order_id=?", String.class, order.id()))
+                .isEqualTo("RELEASED");
+        assertThat(orders.order(replacement.get().id(), 8).status()).isEqualTo("PENDING_PAYMENT");
+        assertInventory(0, 1, 0);
+        payments.applyResult(late.id(), gateway.queryPayment(late.paymentNumber()).orElseThrow());
+        assertInventory(0, 1, 0);
+        assertThat(db.queryForObject("SELECT COUNT(*) FROM et_refund WHERE payment_id=?", Integer.class, late.id())).isOne();
+        long refundId = db.queryForObject("SELECT id FROM et_refund WHERE payment_id=?", Long.class, late.id());
+        db.update("UPDATE et_refund SET next_attempt_at=? WHERE id=?", Timestamp.from(Instant.now().minusSeconds(1)), refundId);
+        var claim = refunds.claimDueRecoveries(100).stream().filter(c -> c.refundId() == refundId).findFirst().orElseThrow();
+        assertThat(refunds.recoverClaim(claim).status()).isEqualTo("SUCCEEDED");
+        assertStatus(() -> refunds.refund(refundId, 8), HttpStatus.NOT_FOUND);
+        assertInventory(0, 1, 0);
+        assertThat(db.queryForObject("SELECT COUNT(*) FROM sim_gateway_refund WHERE payment_number=?", Integer.class,
+                late.paymentNumber())).isOne();
+    }
+
+    @Test
+    void cancellationWinsWhileCommittedGatewayResultIsDeterministicallyDelayed() throws Exception {
+        CountDownLatch gatewayCommitted = new CountDownLatch(1);
+        CountDownLatch releaseResult = new CountDownLatch(1);
+        doAnswer(call -> {
+            Object result = call.callRealMethod();
+            gatewayCommitted.countDown();
+            await(releaseResult);
+            return result;
+        }).when(gateway).createPayment(any());
+        var pool = Executors.newSingleThreadExecutor();
+        try {
+            var pay = pool.submit(() -> payments.create(order.id(), 7, key));
+            await(gatewayCommitted);
+            assertThat(orders.cancel(order.id(), 7).status()).isEqualTo("CLOSED");
+            assertInventory(1, 0, 0);
+            releaseResult.countDown();
+            var late = pay.get(10, TimeUnit.SECONDS);
+            assertThat(late.status()).isEqualTo("SUCCEEDED");
+            assertThat(db.queryForObject("SELECT COUNT(*) FROM et_refund WHERE payment_id=?", Integer.class,
+                    late.id())).isOne();
+            assertThat(orders.order(order.id(), 7).status()).isEqualTo("CLOSED");
+            assertInventory(1, 0, 0);
+        } finally {
+            releaseResult.countDown();
+            pool.shutdownNow();
+        }
+    }
+
+    @Test
+    void lostRefundResponseBecomesUnknownThenQueryCompletesSameRefund() {
         doAnswer(call -> {
             Object result = call.callRealMethod();
             orders.cancel(order.id(), 7);
             return result;
         }).when(gateway).createPayment(any());
         var late = payments.create(order.id(), 7, key);
-        assertThat(late.status()).isEqualTo("SUCCEEDED");
-        assertThat(late.recoveryStatus()).isEqualTo("MANUAL_REQUIRED");
-        assertThat(late.lastError()).isEqualTo("LATE_PAYMENT_COMPENSATION_NOT_IMPLEMENTED");
+        long refundId = db.queryForObject("SELECT id FROM et_refund WHERE payment_id=?", Long.class, late.id());
+        faults.loseNextSuccessfulResponse(GatewayOperation.REFUND);
+        db.update("UPDATE et_refund SET next_attempt_at=? WHERE id=?", Timestamp.from(Instant.now().minusSeconds(1)), refundId);
+        var first = refunds.claimDueRecoveries(100).stream().filter(c -> c.refundId() == refundId).findFirst().orElseThrow();
+        assertThat(refunds.recoverClaim(first).status()).isEqualTo("UNKNOWN");
+        assertThat(db.queryForObject("SELECT COUNT(*) FROM sim_gateway_refund WHERE payment_number=?", Integer.class,
+                late.paymentNumber())).isOne();
+        db.update("UPDATE et_refund SET next_attempt_at=? WHERE id=?", Timestamp.from(Instant.now().minusSeconds(1)), refundId);
+        var second = refunds.claimDueRecoveries(100).stream().filter(c -> c.refundId() == refundId).findFirst().orElseThrow();
+        assertThat(refunds.recoverClaim(second).status()).isEqualTo("SUCCEEDED");
+        assertThat(db.queryForObject("SELECT COUNT(*) FROM sim_gateway_refund WHERE payment_number=?", Integer.class,
+                late.paymentNumber())).isOne();
+        assertInventory(1, 0, 0);
+    }
+
+    @Test
+    void signedRefundCallbackAppliesOnceAndCannotChangeInventory() {
+        doAnswer(call -> {
+            Object result = call.callRealMethod();
+            orders.cancel(order.id(), 7);
+            return result;
+        }).when(gateway).createPayment(any());
+        var late = payments.create(order.id(), 7, key);
+        long refundId = db.queryForObject("SELECT id FROM et_refund WHERE payment_id=?", Long.class, late.id());
+        String refundNumber = db.queryForObject("SELECT refund_number FROM et_refund WHERE id=?", String.class, refundId);
+        var gatewayRefund = gateway.createRefund(new SimulatedPaymentGateway.RefundRequest(refundNumber,
+                late.paymentNumber(), late.amount(), late.currency()));
+        Instant timestamp = Instant.now();
+        String raw = "{\"event\":\"refund-success\"}";
+        var command = refundCallback("refund-event-1", gatewayRefund, order.orderNumber(), timestamp, raw);
+        assertThat(callbacks.receive(command).status()).isEqualTo("APPLIED");
+        assertThat(callbacks.receive(command).status()).isEqualTo("APPLIED");
+        assertThat(refunds.refund(refundId, 7).status()).isEqualTo("SUCCEEDED");
+        assertThat(db.queryForObject("SELECT COUNT(*) FROM sim_gateway_refund WHERE refund_number=?", Integer.class,
+                refundNumber)).isOne();
+        assertInventory(1, 0, 0);
+    }
+
+    @Test
+    void explicitRefundFailureIsVisibleAndAuditedManualRetryReusesTheNumber() {
+        doAnswer(call -> {
+            Object result = call.callRealMethod();
+            orders.cancel(order.id(), 7);
+            return result;
+        }).when(gateway).createPayment(any());
+        var late = payments.create(order.id(), 7, key);
+        long refundId = db.queryForObject("SELECT id FROM et_refund WHERE payment_id=?", Long.class, late.id());
+        AtomicBoolean first = new AtomicBoolean(true);
+        doAnswer(call -> {
+            SimulatedPaymentGateway.GatewayRefund result = (SimulatedPaymentGateway.GatewayRefund) call.callRealMethod();
+            if (!first.getAndSet(false)) return result;
+            db.update("UPDATE sim_gateway_refund SET status='FAILED' WHERE refund_number=?", result.refundNumber());
+            return new SimulatedPaymentGateway.GatewayRefund(result.refundNumber(), result.paymentNumber(), result.amount(),
+                    result.currency(), GatewayResultStatus.FAILED, result.providerRefundId(), result.createdAt(), Instant.now());
+        }).when(gateway).createRefund(any());
+        db.update("UPDATE et_refund SET next_attempt_at=? WHERE id=?", Timestamp.from(Instant.now().minusSeconds(1)), refundId);
+        var claim = refunds.claimDueRecoveries(100).stream().filter(c -> c.refundId() == refundId).findFirst().orElseThrow();
+        var failed = refunds.recoverClaim(claim);
+        assertThat(failed.status()).isEqualTo("FAILED");
+        assertThat(failed.recoveryStatus()).isEqualTo("MANUAL_REQUIRED");
+        String operationKey = UUID.randomUUID().toString();
+        var recovered = refunds.manualRetry(refundId, 1, operationKey, "Provider issue resolved");
+        assertThat(recovered.status()).isEqualTo("SUCCEEDED");
+        assertThat(refunds.manualRetry(refundId, 1, operationKey, "Provider issue resolved")).isEqualTo(recovered);
+        assertStatus(() -> refunds.manualRetry(refundId, 1, operationKey, "Different request"), HttpStatus.CONFLICT);
+        assertThat(db.queryForObject("SELECT COUNT(*) FROM sim_gateway_refund WHERE refund_number=?", Integer.class,
+                recovered.refundNumber())).isOne();
+        assertThat(db.queryForObject("SELECT COUNT(*) FROM et_payment_history WHERE refund_id=? AND action='REFUND_MANUAL_RETRY'",
+                Integer.class, refundId)).isOne();
+        verify(gateway, times(2)).createRefund(any());
+        assertInventory(1, 0, 0);
+    }
+
+    @Test
+    void explicitPaymentFailureCanOnlyBeRetriedWithOneAuditedOperation() {
+        AtomicBoolean first = new AtomicBoolean(true);
+        doAnswer(call -> {
+            SimulatedPaymentGateway.GatewayPayment result = (SimulatedPaymentGateway.GatewayPayment) call.callRealMethod();
+            if (!first.getAndSet(false)) return result;
+            db.update("UPDATE sim_gateway_payment SET status='FAILED' WHERE payment_number=?", result.paymentNumber());
+            return new SimulatedPaymentGateway.GatewayPayment(result.paymentNumber(), result.orderReference(),
+                    result.amount(), result.currency(), GatewayResultStatus.FAILED, result.providerTransactionId(),
+                    result.createdAt(), Instant.now());
+        }).when(gateway).createPayment(any());
+        var failed = payments.create(order.id(), 7, key);
+        assertThat(failed.status()).isEqualTo("FAILED");
+        assertThat(failed.recoveryStatus()).isEqualTo("MANUAL_REQUIRED");
+        assertPending();
+        String operationKey = UUID.randomUUID().toString();
+        var paid = payments.manualRetry(failed.id(), 1, operationKey, "Retry confirmed failed charge");
+        assertThat(paid.status()).isEqualTo("SUCCEEDED");
+        assertThat(payments.manualRetry(failed.id(), 1, operationKey, "Retry confirmed failed charge")).isEqualTo(paid);
+        assertStatus(() -> payments.manualRetry(failed.id(), 1, operationKey, "Different request"), HttpStatus.CONFLICT);
+        assertThat(db.queryForObject("SELECT COUNT(*) FROM sim_gateway_payment WHERE payment_number=?", Integer.class,
+                paid.paymentNumber())).isOne();
+        assertThat(db.queryForObject("SELECT COUNT(*) FROM et_payment_history WHERE payment_id=? AND action='PAYMENT_MANUAL_RETRY'",
+                Integer.class, paid.id())).isOne();
+        verify(gateway, times(2)).createPayment(any());
+        assertPaid();
+    }
+
+    @Test
+    void manualRecoveryNeverStartsANewChargeAfterClosure() {
+        doThrow(new IllegalStateException("gateway unavailable")).when(gateway).createPayment(any());
+        var unknown = payments.create(order.id(), 7, key);
+        assertThat(unknown.status()).isEqualTo("UNKNOWN");
+        assertThat(orders.cancel(order.id(), 7).status()).isEqualTo("CLOSED");
+        db.update("UPDATE et_payment SET recovery_status='MANUAL_REQUIRED',next_attempt_at=NULL WHERE id=?", unknown.id());
+
+        var unchanged = payments.manualRetry(unknown.id(), 1, UUID.randomUUID().toString(),
+                "Gateway has no matching transaction");
+
+        assertThat(unchanged.status()).isEqualTo("UNKNOWN");
+        assertThat(unchanged.recoveryStatus()).isEqualTo("MANUAL_REQUIRED");
+        assertThat(db.queryForObject("SELECT COUNT(*) FROM sim_gateway_payment WHERE payment_number=?", Integer.class,
+                unknown.paymentNumber())).isZero();
+        verify(gateway, times(1)).createPayment(any());
         assertThat(orders.order(order.id(), 7).status()).isEqualTo("CLOSED");
-        assertThat(db.queryForObject("SELECT status FROM et_inventory_reservation WHERE order_id=?", String.class, order.id()))
-                .isEqualTo("RELEASED");
         assertInventory(1, 0, 0);
-        payments.applyResult(late.id(), gateway.queryPayment(late.paymentNumber()).orElseThrow());
-        assertInventory(1, 0, 0);
-        assertThat(db.queryForObject("SELECT COUNT(*) FROM et_refund WHERE payment_id=?", Integer.class, late.id())).isZero();
+    }
+
+    @Test
+    void exhaustedRefundRecoveryBecomesQueryableManualWork() {
+        doAnswer(call -> {
+            Object result = call.callRealMethod();
+            orders.cancel(order.id(), 7);
+            return result;
+        }).when(gateway).createPayment(any());
+        var late = payments.create(order.id(), 7, key);
+        long refundId = db.queryForObject("SELECT id FROM et_refund WHERE payment_id=?", Long.class, late.id());
+        db.update("UPDATE et_refund SET attempts=5,next_attempt_at=? WHERE id=?",
+                Timestamp.from(Instant.now().minusSeconds(1)), refundId);
+        assertThat(refunds.claimDueRecoveries(100)).isEmpty();
+        var manual = refunds.refund(refundId, 7);
+        assertThat(manual.status()).isEqualTo("REQUESTED");
+        assertThat(manual.recoveryStatus()).isEqualTo("MANUAL_REQUIRED");
+        assertThat(manual.lastError()).isEqualTo("REFUND_ATTEMPTS_EXHAUSTED");
+        verify(gateway, never()).createRefund(any());
+    }
+
+    @Test
+    void concurrentIdenticalCallbacksProduceOneReceiptAndOneAllocation() throws Exception {
+        faults.loseNextSuccessfulResponse(GatewayOperation.PAYMENT);
+        var unknown = payments.create(order.id(), 7, key);
+        var result = gateway.queryPayment(unknown.paymentNumber()).orElseThrow();
+        Instant timestamp = Instant.now();
+        var command = callback("event-concurrent", result, timestamp, "{\"event\":\"same\"}");
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        var pool = Executors.newFixedThreadPool(2);
+        try {
+            var first = pool.submit(() -> { ready.countDown(); await(start); return callbacks.receive(command); });
+            var second = pool.submit(() -> { ready.countDown(); await(start); return callbacks.receive(command); });
+            await(ready);
+            start.countDown();
+            assertThat(first.get(10, TimeUnit.SECONDS).status()).isEqualTo("APPLIED");
+            assertThat(second.get(10, TimeUnit.SECONDS).status()).isEqualTo("APPLIED");
+            assertThat(db.queryForObject("SELECT COUNT(*) FROM et_payment_callback WHERE event_id='event-concurrent'",
+                    Integer.class)).isOne();
+            assertPaid();
+        } finally {
+            start.countDown();
+            pool.shutdownNow();
+        }
     }
 
     @Test
@@ -264,6 +501,39 @@ abstract class PaymentServiceContract {
     }
 
     @Test
+    void authenticatedMismatchedAndUnknownCallbacksRemainAuditableWithoutBusinessEffects() {
+        faults.loseNextSuccessfulResponse(GatewayOperation.PAYMENT);
+        var unknown = payments.create(order.id(), 7, key);
+        var result = gateway.queryPayment(unknown.paymentNumber()).orElseThrow();
+        Instant now = Instant.now();
+        String mismatchRaw = "{\"event\":\"mismatch\"}";
+        var mismatch = new PaymentCallbackService.CallbackCommand("simulated", "event-mismatch", "PAYMENT",
+                result.paymentNumber(), result.providerTransactionId(), "OTHER-ORDER", result.amount(), result.currency(),
+                result.status(), now, mismatchRaw, sign("callback-test-secret", now, mismatchRaw));
+        assertThat(callbacks.receive(mismatch).status()).isEqualTo("REJECTED");
+        assertPending();
+
+        String unmatchedRaw = "{\"event\":\"unmatched\"}";
+        var unmatched = new PaymentCallbackService.CallbackCommand("simulated", "event-unmatched", "PAYMENT",
+                "EP-ABSENT", "GP-ABSENT", "EO-ABSENT", 4750, "CNY", GatewayResultStatus.SUCCEEDED,
+                now, unmatchedRaw, sign("callback-test-secret", now, unmatchedRaw));
+        var stored = callbacks.receive(unmatched);
+        assertThat(stored.status()).isEqualTo("UNMATCHED");
+        assertThat(db.queryForObject("SELECT recovery_status FROM et_payment_callback WHERE id=?", String.class,
+                stored.id())).isEqualTo("MANUAL_REQUIRED");
+        assertPending();
+
+        Instant stale = now.minusSeconds(301);
+        String staleRaw = "{\"event\":\"stale\"}";
+        var staleCommand = new PaymentCallbackService.CallbackCommand("simulated", "event-stale", "PAYMENT",
+                result.paymentNumber(), result.providerTransactionId(), result.orderReference(), result.amount(),
+                result.currency(), result.status(), stale, staleRaw, sign("callback-test-secret", stale, staleRaw));
+        assertStatus(() -> callbacks.receive(staleCommand), HttpStatus.UNAUTHORIZED);
+        assertThat(db.queryForObject("SELECT COUNT(*) FROM et_payment_callback WHERE event_id='event-stale'",
+                Integer.class)).isZero();
+    }
+
+    @Test
     void recoveryClaimsQueryPersistedGatewayAndHandsOffExhaustedUncertainty() {
         faults.loseNextSuccessfulResponse(GatewayOperation.PAYMENT);
         var unknown = payments.create(order.id(), 7, key);
@@ -278,6 +548,23 @@ abstract class PaymentServiceContract {
                 Timestamp.from(Instant.now().minusSeconds(1)), unknown.id());
         assertThat(payments.claimDueRecoveries(100)).isEmpty();
         assertThat(payments.payment(unknown.id(), 7).recoveryStatus()).isEqualTo("MANUAL_REQUIRED");
+    }
+
+    @Test
+    void reconstructedStartupScannerRecoversPersistedUnknownPayment() {
+        faults.loseNextSuccessfulResponse(GatewayOperation.PAYMENT);
+        var unknown = payments.create(order.id(), 7, key);
+        db.update("UPDATE et_payment SET next_attempt_at=? WHERE id=?",
+                Timestamp.from(Instant.now().minusSeconds(1)), unknown.id());
+        var reconstructedPayments = new EventPaymentService(db, manager, gateway);
+        var reconstructedRefunds = new EventRefundService(db, manager, gateway);
+        var reconstructedCallbacks = new PaymentCallbackService(db, manager, reconstructedPayments,
+                reconstructedRefunds, "callback-test-secret", 300);
+        var scanner = new PaymentRecoveryScanner(reconstructedPayments, reconstructedRefunds,
+                reconstructedCallbacks, 100);
+        scanner.recoverAfterRestart();
+        assertThat(reconstructedPayments.payment(unknown.id(), 7).status()).isEqualTo("SUCCEEDED");
+        assertPaid();
     }
 
     @Test
@@ -325,10 +612,47 @@ abstract class PaymentServiceContract {
         }
     }
 
+    @Test
+    void concurrentRefundScannersCannotClaimTheSameIntentTwice() throws Exception {
+        doAnswer(call -> {
+            Object result = call.callRealMethod();
+            orders.cancel(order.id(), 7);
+            return result;
+        }).when(gateway).createPayment(any());
+        var late = payments.create(order.id(), 7, key);
+        long refundId = db.queryForObject("SELECT id FROM et_refund WHERE payment_id=?", Long.class, late.id());
+        db.update("UPDATE et_refund SET next_attempt_at=? WHERE id=?", Timestamp.from(Instant.now().minusSeconds(1)), refundId);
+        CountDownLatch bothSelected = new CountDownLatch(2);
+        CountDownLatch release = new CountDownLatch(1);
+        db.afterRefundRecoveryCandidates.set(() -> { bothSelected.countDown(); await(release); });
+        var pool = Executors.newFixedThreadPool(2);
+        try {
+            var first = pool.submit(() -> refunds.claimDueRecoveries(100));
+            var second = pool.submit(() -> refunds.claimDueRecoveries(100));
+            await(bothSelected);
+            release.countDown();
+            long targetClaims = java.util.stream.Stream.concat(first.get(10, TimeUnit.SECONDS).stream(),
+                    second.get(10, TimeUnit.SECONDS).stream()).filter(c -> c.refundId() == refundId).count();
+            assertThat(targetClaims).isOne();
+            assertThat(db.queryForObject("SELECT attempts FROM et_refund WHERE id=?", Integer.class, refundId)).isOne();
+        } finally {
+            release.countDown();
+            db.afterRefundRecoveryCandidates.set(null);
+            pool.shutdownNow();
+        }
+    }
+
     private static PaymentCallbackService.CallbackCommand callback(String eventId,
             SimulatedPaymentGateway.GatewayPayment result, Instant timestamp, String rawBody) {
         return new PaymentCallbackService.CallbackCommand("simulated", eventId, "PAYMENT", result.paymentNumber(),
                 result.providerTransactionId(), result.orderReference(), result.amount(), result.currency(), result.status(),
+                timestamp, rawBody, sign("callback-test-secret", timestamp, rawBody));
+    }
+
+    private static PaymentCallbackService.CallbackCommand refundCallback(String eventId,
+            SimulatedPaymentGateway.GatewayRefund result, String orderReference, Instant timestamp, String rawBody) {
+        return new PaymentCallbackService.CallbackCommand("simulated", eventId, "REFUND", result.refundNumber(),
+                result.providerRefundId(), orderReference, result.amount(), result.currency(), result.status(),
                 timestamp, rawBody, sign("callback-test-secret", timestamp, rawBody));
     }
 
@@ -382,6 +706,7 @@ abstract class PaymentServiceContract {
         final AtomicReference<Runnable> afterOrderLock = new AtomicReference<>();
         final AtomicReference<Runnable> afterCandidates = new AtomicReference<>();
         final AtomicReference<Runnable> afterRecoveryCandidates = new AtomicReference<>();
+        final AtomicReference<Runnable> afterRefundRecoveryCandidates = new AtomicReference<>();
         boolean failResultHistory;
 
         GateJdbc(DataSource source) { super(source); }
@@ -417,6 +742,10 @@ abstract class PaymentServiceContract {
             }
             if (sql.contains("FROM et_payment") && sql.contains("recovery_status='AUTO'")) {
                 Runnable hook = afterRecoveryCandidates.get();
+                if (hook != null) hook.run();
+            }
+            if (sql.contains("FROM et_refund") && sql.contains("recovery_status='AUTO'")) {
+                Runnable hook = afterRefundRecoveryCandidates.get();
                 if (hook != null) hook.run();
             }
         }

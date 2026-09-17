@@ -6,12 +6,13 @@ A modular-monolith transaction backend built with Java 21, Spring Boot, MySQL, R
 
 ## Current Implementation Scope
 
-The current baseline implements event, session, and ticket-tier creation, publication, and queries; synchronous owned-order creation with a server-side price snapshot and inventory reservation; unpaid-order cancellation; database-driven timeout closure; idempotent inventory release; and restart recovery scans. Source now includes the V6 payment schema, an independently committed persistent simulated gateway, local payment orchestration, and slice 6.5 persisted query recovery plus a signed-callback receipt boundary. On 2026-09-17, the final IDEA runs with Microsoft OpenJDK 21.0.7 completed 14 H2 payment and 14 MySQL 8.4 payment integration tests without failures or skips. Payment HTTP endpoints and late-payment compensation refunds are not implemented. A charge confirmed after closure is retained with a manual-handling marker, not refunded. See the [6.5 verification record](docs/verification/CHECKLIST-6-5.md); this is not full checklist-item-6 acceptance.
+The current baseline implements event, session, and ticket-tier creation, publication, and queries; synchronous orders and inventory reservations; unpaid-order cancellation; database-driven closure; idempotent release; and restart scans. The V1 payment boundary now includes V6 persistence, an independently committed simulated gateway, `UNKNOWN` query/callback recovery, payment-versus-close races, one late-payment compensation refund, owned query/refresh routes, and ADMIN recovery routes. On 2026-09-17, IDEA with Microsoft OpenJDK 21.0.7 passed 26 H2 payment-contract tests, 26 MySQL 8.4 payment-boundary tests, and 7 HTTP/security tests, with no failures or skips. See the [0-6 verification record](docs/verification/CHECKLIST-0-6.md) for scope, evidence, and limitations.
 
 ## Highlights
 
 - **MySQL transaction source of truth:** sixteen inventory buckets spread writes for one voucher, while conditional updates and unique constraints prevent overselling and duplicate orders; Redis does not store final transaction state.
 - **V1 event-trading baseline:** an event contains multiple sessions and ticket tiers; one order buys one ticket, snapshots the server-side price, and commits the order and `RESERVED` record in one MySQL transaction.
+- **Recoverable payment boundary:** simulated-provider results commit independently; a lost response remains `UNKNOWN` and recovers under the original payment number, while a charge confirmed after closure creates only one same-number-retry compensation refund and never changes inventory again.
 - **Short transactions and overload protection:** idempotency reads occur outside the transaction, while a fair semaphore bounds in-flight database work and returns `429` quickly under overload.
 - **Transactional publishing intent:** inventory deduction, request creation, and the Outbox event commit in one database transaction; a consumer creates the final order.
 - **Asynchronous messaging:** leased Outbox batches, Confirm/Return checks, persistent messages, transactional batch consumption, a failure queue, and scheduled redelivery are implemented; these mechanisms do not establish that every failure scenario has been tested.
@@ -19,7 +20,7 @@ The current baseline implements event, session, and ticket-tier creation, public
 - **Layered admission control:** one Redis `TIME`-based Lua token-bucket call enforces per-user, per-voucher, and global request limits.
 - **Observability:** a dedicated management port exposes Prometheus metrics for the connection pool, reservation latency, completion lag, admission rejection, and Outbox backlog.
 - **Security boundaries:** token authentication, administrator authorization, atomic code consumption, rate limiting, and request identity cleanup.
-- **Automated verification:** the last accepted checklist 0–5 baseline passed 38 default tests; two isolated integration tests covered Flyway V1–V5, real MySQL, Redis, RabbitMQ, and 1,000-request inventory contention, while two real-MySQL lifecycle tests covered the 30-second timeout, cancel/close and create/close races, inventory conservation, and restart recovery. The new V6 and simulated-gateway tests still require an IDEA rerun.
+- **Automated verification:** the accepted checklist 0-5 baseline passed 38 default tests; its isolated tests cover Flyway V1-V5, real MySQL, Redis, RabbitMQ, 1,000-request inventory contention, and order lifecycle. Item 6 was separately verified in IDEA by 26 H2 payment-contract, 26 MySQL 8.4 payment-boundary, and 7 HTTP/security tests; the complete default suite was not rerun for this update.
 
 ## Technology Stack
 
@@ -71,6 +72,9 @@ The current Outbox `completed` flag means consumer processing completed, not mer
 - Synchronous event-order creation with a server-side CNY-fen price snapshot and separate reservation record.
 - Replay of the original order for one user and idempotency key, plus a one-order-per-user-and-tier limit.
 - Authenticated ownership filters for order details and lists; another user's lookup returns not found.
+- Independently persisted simulated payments, signed callbacks, `UNKNOWN`/startup recovery, and same-business-number idempotent recovery.
+- One-time reservation confirmation when payment wins; one full compensation refund when closure wins, with no refund inventory mutation.
+- Owned payment/compensation-refund query and refresh routes plus audited, idempotent ADMIN retries.
 - Vouchers and limited-time purchases.
 - Conditional database inventory deduction.
 - Sixteen MySQL inventory buckets per voucher to spread row-lock contention.
@@ -128,7 +132,7 @@ docker compose ps
 
 Default ports: MySQL `3307`, Redis `6380`, RabbitMQ `5673`, and RabbitMQ management UI `15673`.
 
-The current source contains Flyway `V1` through `V6`; V6 adds local payment/refund records and independent simulated-gateway result tables. On 2026-09-17, `EventPaymentServiceIT` verified all six migrations on a clean MySQL 8.4 database. An existing local database may be baselined at version `2` only after confirming that it already contains the historical base tables and the order/Outbox upgrade; later migrations are then applied, and Flyway clean is disabled. Test seed data exists only under `src/test/resources` and is never loaded into the development database.
+The current source contains Flyway `V1` through `V6`; V6 adds local payment/refund, callback/history, and independent simulated-gateway result tables. On 2026-09-17, `PaymentBoundaryIT` verified all six migrations on a clean MySQL 8.4 database. An existing local database may be baselined at version `2` only after confirming that it already contains the historical base tables and the order/Outbox upgrade; later migrations are then applied, and Flyway clean is disabled. Test seed data exists only under `src/test/resources` and is never loaded into the development database.
 
 ### 3. Start the application
 
@@ -156,6 +160,8 @@ mvn -Pinfrastructure verify
 ```
 
 On the same date, `InfrastructureIT` was run directly by IDEA: **2 tests passed, 0 failed**. It verifies ordered Flyway `V1` through `V5` migration on an empty MySQL 8.4 database plus real-MySQL event ordering, Redis, RabbitMQ, and 1,000 valid requests contending for 100 tickets: 100 reservations succeeded, 900 were business rejections, and none failed technically, with inventory and reservation conservation verified. `EventOrderLifecycleIT` also passed both tests, covering the 30-second TTL, one-second scan, cancel-versus-expiry and same-tier create-versus-close races, inventory release, and restart recovery; four overdue orders were processed about 43 ms after the restarted application became ready. A separate default-suite test verifies that persisted failure backoff does not starve later candidates. Flyway 11.7.2 warns that its database recognition table has not certified MySQL 8.4; the migrations and assertions pass, but the compatibility warning remains a known limitation. Direct IDEA runs do not create Maven Failsafe reports, so these results are evidenced by the test classes' exit code 0 and complete console output.
+
+On 2026-09-17, focused checklist-item-6 acceptance ran through IDEA with Microsoft OpenJDK 21.0.7: `EventPaymentServiceTest` passed **26 tests**, real-MySQL-8.4 `PaymentBoundaryIT` passed **26 tests**, and the payment controller, callback, ADMIN recovery, and security regression classes passed **7 tests** in total; all had zero failures and zero skips. Bounded barriers, real row-lock hooks, and fault injection select race order; no `sleep` is used as race proof. Coverage includes normal payment, lost-response recovery, payment-first, closure-first with exactly one compensation refund, duplicate callbacks/retries, manual handoff, no new charge after closure, and no second inventory change after late payment. This update did not rerun the 38-test complete default suite, run an item-7 joint demo, or benchmark payment throughput. See the [0-6 verification record](docs/verification/CHECKLIST-0-6.md).
 
 ## Load Testing
 
@@ -210,6 +216,7 @@ event-trading-platform/
 - MySQL is the final source of truth for inventory and orders; Redis provides caching, sessions, and admission control.
 - Inventory for one voucher is spread across sixteen MySQL row buckets and summed on reads; existing databases migrate through `db/performance-upgrade.sql`.
 - The legacy purchase endpoint returns a request ID and RabbitMQ creates the final voucher order asynchronously; `/api/v1/orders` creates the event order synchronously in a local transaction.
+- The simulated gateway and local payment state use separate transactions on the same physical MySQL. This verifies a durable boundary, not real funds or a separate-database failure domain. V1 has no user-initiated refund and emits no new payment/refund MQ events.
 - Management port `127.0.0.1:8082` exposes only health and Prometheus endpoints.
 - The local Compose stack is for development and verification, not a production deployment environment.
 
@@ -221,3 +228,5 @@ The architecture documents include target designs and should be distinguished fr
 - [Domain model design](docs/architecture/DOMAIN-MODEL.md)
 - [Business state machine design](docs/architecture/STATE-MACHINES.md)
 - [API contract design](docs/architecture/API-CONTRACT.md)
+- [Payment boundary design](docs/architecture/PAYMENT-BOUNDARY-DESIGN.md)
+- [Checklist 0-6 verification](docs/verification/CHECKLIST-0-6.md)

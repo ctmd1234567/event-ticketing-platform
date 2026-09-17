@@ -12,15 +12,17 @@ import org.springframework.stereotype.Component;
 @ConditionalOnProperty(name = "app.payment-recovery.enabled", havingValue = "true", matchIfMissing = true)
 public class PaymentRecoveryScanner {
     private final EventPaymentService payments;
+    private final EventRefundService refunds;
     private final PaymentCallbackService callbacks;
     private final int batchSize;
-    public PaymentRecoveryScanner(EventPaymentService payments, PaymentCallbackService callbacks,
+    public PaymentRecoveryScanner(EventPaymentService payments, EventRefundService refunds, PaymentCallbackService callbacks,
             @Value("${app.payment-recovery.batch-size:100}") int batchSize) {
-        this.payments = payments; this.callbacks = callbacks; this.batchSize = Math.max(1, batchSize);
+        this.payments = payments; this.refunds = refunds; this.callbacks = callbacks; this.batchSize = Math.max(1, batchSize);
     }
     @EventListener(ApplicationReadyEvent.class) public void recoverAfterRestart() { scan(); }
     @Scheduled(fixedDelayString = "${app.payment-recovery.interval-ms:1000}") public void scan() {
         for (EventPaymentService.RecoveryClaim claim : payments.claimDueRecoveries(batchSize)) payments.recoverClaim(claim);
+        for (EventRefundService.RecoveryClaim claim : refunds.claimDueRecoveries(batchSize)) refunds.recoverClaim(claim);
         callbacks.recoverDueReceipts(batchSize);
     }
 }

@@ -100,6 +100,14 @@ public class JdbcSimulatedPaymentGateway implements SimulatedPaymentGateway {
         if (existing.isPresent()) {
             GatewayPayment replay = existing.get();
             assertSamePayment(replay, request);
+            if (replay.status() == GatewayResultStatus.FAILED) {
+                GatewayResultStatus retried = outcomes.paymentOutcome(request);
+                if (retried != GatewayResultStatus.FAILED) {
+                    db.update("UPDATE sim_gateway_payment SET status=? WHERE payment_number=? AND status='FAILED'",
+                            retried.name(), request.paymentNumber());
+                    return findPayment(request.paymentNumber()).orElseThrow();
+                }
+            }
             return replay;
         }
         GatewayResultStatus outcome = outcomes.paymentOutcome(request);
@@ -121,6 +129,14 @@ public class JdbcSimulatedPaymentGateway implements SimulatedPaymentGateway {
         if (existing.isPresent()) {
             GatewayRefund replay = existing.get();
             assertSameRefund(replay, request);
+            if (replay.status() == GatewayResultStatus.FAILED) {
+                GatewayResultStatus retried = outcomes.refundOutcome(request);
+                if (retried != GatewayResultStatus.FAILED) {
+                    db.update("UPDATE sim_gateway_refund SET status=? WHERE refund_number=? AND status='FAILED'",
+                            retried.name(), request.refundNumber());
+                    return findRefund(request.refundNumber()).orElseThrow();
+                }
+            }
             return replay;
         }
         GatewayPayment payment = findPayment(request.paymentNumber()).orElseThrow(

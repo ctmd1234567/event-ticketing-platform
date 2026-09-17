@@ -46,10 +46,14 @@ class SecurityRegressionTest {
         @GetMapping("/user/me") Long me() { return UserHolder.getUser().getId(); }
         @GetMapping("/api/v1/events") String events() { return "events"; }
         @PostMapping("/api/v1/admin/events") String createEvent() { return "created"; }
+        @PostMapping("/api/v1/payment-callbacks/simulated") String callback() { return "accepted"; }
+        @PostMapping("/api/v1/payment-callbacks/other") String otherCallback() { return "wrong"; }
     }
     @Test void publicReadsAndAdminOnlyWrites() throws Exception {
         mvc.perform(get("/shop/1")).andExpect(status().isOk());
         mvc.perform(get("/api/v1/events")).andExpect(status().isOk());
+        mvc.perform(post("/api/v1/payment-callbacks/simulated")).andExpect(status().isOk());
+        mvc.perform(post("/api/v1/payment-callbacks/other")).andExpect(status().isUnauthorized());
         mvc.perform(post("/shop")).andExpect(status().isUnauthorized());
         mvc.perform(put("/shop").header("authorization",USER)).andExpect(status().isForbidden());
         mvc.perform(post("/voucher/seckill").header("authorization",USER)).andExpect(status().isForbidden());

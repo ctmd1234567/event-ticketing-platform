@@ -22,20 +22,23 @@ import java.time.Instant;
 import java.util.HexFormat;
 import java.util.Objects;
 
-/** Durable payment-callback receipt boundary. HTTP routing is deliberately deferred to 6.7. */
+/** Durable payment/refund callback receipt boundary. HTTP routing is provided separately. */
 @Service
 public class PaymentCallbackService {
     private final JdbcTemplate db;
     private final TransactionTemplate receipts;
     private final EventPaymentService payments;
+    private final EventRefundService refunds;
     private final String secret;
     private final Duration freshness;
 
     public PaymentCallbackService(JdbcTemplate db, PlatformTransactionManager manager, EventPaymentService payments,
+            EventRefundService refunds,
             @Value("${app.simulated-gateway.callback-secret:}") String secret,
             @Value("${app.simulated-gateway.callback-freshness-seconds:300}") long freshnessSeconds) {
         this.db = db;
         this.payments = payments;
+        this.refunds = refunds;
         this.secret = secret == null ? "" : secret;
         this.freshness = Duration.ofSeconds(Math.max(1, freshnessSeconds));
         this.receipts = new TransactionTemplate(manager);
@@ -55,9 +58,15 @@ public class PaymentCallbackService {
         CallbackView receipt = callback(receiptId);
         if (!"RECEIVED".equals(receipt.status())) return;
         try {
-            EventPaymentService.PaymentView payment = payments.paymentByNumber(receipt.businessNumber());
-            validateBinding(payment, receipt);
-            payments.applyCallbackResult(payment.id(), gatewayPayment(receipt), receipt.id());
+            if ("PAYMENT".equals(receipt.kind())) {
+                EventPaymentService.PaymentView payment = payments.paymentByNumber(receipt.businessNumber());
+                validatePaymentBinding(payment, receipt);
+                payments.applyCallbackResult(payment.id(), gatewayPayment(receipt), receipt.id());
+            } else {
+                EventRefundService.RefundView refund = refunds.refundByNumber(receipt.businessNumber());
+                validateRefundBinding(refund, receipt);
+                refunds.applyCallbackResult(refund.id(), gatewayRefund(refund, receipt), receipt.id());
+            }
         } catch (ResponseStatusException rejected) {
             if (rejected.getStatusCode() == HttpStatus.NOT_FOUND) unmatched(receipt.id(), rejected.getReason());
             else reject(receipt.id(), rejected.getReason());
@@ -106,10 +115,9 @@ public class PaymentCallbackService {
         String hash = sha256(command.rawBody());
         try {
             return Objects.requireNonNull(receipts.execute(tx -> {
-                String initial = "PAYMENT".equals(command.kind()) ? "RECEIVED" : "REJECTED";
-                String reason = "PAYMENT".equals(command.kind()) ? null : "REFUND_CALLBACK_NOT_IMPLEMENTED";
-                String recovery = "RECEIVED".equals(initial) ? "AUTO" : "NONE";
-                Timestamp nextAttempt = "RECEIVED".equals(initial) ? Timestamp.from(Instant.now().plusSeconds(5)) : null;
+                String initial = "RECEIVED";
+                String recovery = "AUTO";
+                Timestamp nextAttempt = Timestamp.from(Instant.now().plusSeconds(5));
                 long id = IdWorker.getId();
                 db.update("""
                         INSERT INTO et_payment_callback(id,provider,event_id,kind,business_number,payload_hash,
@@ -118,13 +126,15 @@ public class PaymentCallbackService {
                         VALUES (?,?,?, ?,?,?, ?,?,?,?, ?,?,?,1,?,?)
                         """, id, command.provider(), command.eventId(), command.kind(), command.businessNumber(), hash,
                         command.providerResultId(), command.orderReference(), command.amount(), command.currency(),
-                        command.status().name(), initial, reason, nextAttempt, recovery);
+                        command.status().name(), initial, null, nextAttempt, recovery);
                 return callback(id);
             }));
         } catch (DuplicateKeyException duplicate) {
             CallbackView existing = db.queryForObject("SELECT * FROM et_payment_callback WHERE provider=? AND event_id=?",
                     (rs, row) -> map(rs), command.provider(), command.eventId());
-            if (!existing.payloadHash().equals(hash)) throw conflict("Callback event ID was reused with a different payload");
+            if (!Objects.equals(existing.payloadHash(), hash)) {
+                throw conflict("Callback event ID was reused with a different payload");
+            }
             return existing;
         }
     }
@@ -147,6 +157,15 @@ public class PaymentCallbackService {
     private void validateAuthentication(CallbackCommand command) {
         if (secret.isBlank()) throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Callback secret is not configured");
         if (!"simulated".equals(command.provider()) || command.eventId() == null || command.eventId().isBlank()
+                || command.eventId().length() > 64
+                || !("PAYMENT".equals(command.kind()) || "REFUND".equals(command.kind()))
+                || command.businessNumber() == null || command.businessNumber().isBlank()
+                || command.businessNumber().length() > 64
+                || command.providerResultId() == null || command.providerResultId().isBlank()
+                || command.providerResultId().length() > 64
+                || command.orderReference() == null || command.orderReference().isBlank()
+                || command.orderReference().length() > 64 || command.amount() < 0
+                || command.currency() == null || command.currency().length() != 3
                 || command.rawBody() == null || command.signature() == null || command.timestamp() == null || command.status() == null
                 || Duration.between(command.timestamp(), Instant.now()).abs().compareTo(freshness) > 0) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid callback authentication");
@@ -158,7 +177,7 @@ public class PaymentCallbackService {
         if (!MessageDigest.isEqual(expected, supplied)) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid callback signature");
     }
 
-    private static void validateBinding(EventPaymentService.PaymentView payment, CallbackView command) {
+    private static void validatePaymentBinding(EventPaymentService.PaymentView payment, CallbackView command) {
         if (!"PAYMENT".equals(command.kind()) || !payment.paymentNumber().equals(command.businessNumber())
                 || command.providerResultId() == null || command.providerResultId().isBlank()
                 || payment.amount() != command.amount()
@@ -167,9 +186,25 @@ public class PaymentCallbackService {
         }
     }
 
+    private static void validateRefundBinding(EventRefundService.RefundView refund, CallbackView command) {
+        if (!"REFUND".equals(command.kind()) || !refund.refundNumber().equals(command.businessNumber())
+                || command.providerResultId() == null || command.providerResultId().isBlank()
+                || !refund.orderReference().equals(command.orderReference())
+                || refund.amount() != command.amount() || !refund.currency().equals(command.currency())) {
+            throw conflict("Callback does not match immutable refund binding");
+        }
+    }
+
     private static SimulatedPaymentGateway.GatewayPayment gatewayPayment(CallbackView command) {
         return new SimulatedPaymentGateway.GatewayPayment(command.businessNumber(), command.orderReference(), command.amount(),
                 command.currency(), GatewayResultStatus.valueOf(command.resultStatus()), command.providerResultId(), Instant.now(), Instant.now());
+    }
+
+    private static SimulatedPaymentGateway.GatewayRefund gatewayRefund(EventRefundService.RefundView refund,
+            CallbackView command) {
+        return new SimulatedPaymentGateway.GatewayRefund(command.businessNumber(), refund.paymentNumber(), command.amount(),
+                command.currency(), GatewayResultStatus.valueOf(command.resultStatus()), command.providerResultId(),
+                Instant.now(), Instant.now());
     }
 
     private CallbackView map(java.sql.ResultSet rs) throws java.sql.SQLException {

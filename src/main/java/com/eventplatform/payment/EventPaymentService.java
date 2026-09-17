@@ -22,7 +22,7 @@ import java.time.Instant;
 import java.util.HexFormat;
 import java.util.Objects;
 
-/** Initial payment orchestration only; recovery workers, callbacks and refunds are later slices. */
+/** Local payment orchestration. Provider calls always happen outside local business transactions. */
 @Service
 public class EventPaymentService {
     private final JdbcTemplate db;
@@ -122,14 +122,16 @@ public class EventPaymentService {
         return required(transactions.execute(tx -> {
             LockedOrder order = lockOrder(orderId);
             PaymentView current = lockPayment(paymentId);
-            if (callbackId != null) lockReceivedCallback(callbackId);
+            boolean applyCallback = callbackId == null || lockCallbackForApply(callbackId);
             validateResult(order, current, result);
+            if (!applyCallback) return current;
             if ("SUCCEEDED".equals(current.status())) {
                 if (result.status() != GatewayResultStatus.SUCCEEDED) {
                     throw conflict("Contradictory result for a successful payment");
                 }
+                if ("CLOSED".equals(order.status())) ensureCompensationIntent(current);
                 if (callbackId != null) acknowledgeTerminalCallback(paymentId, current.status(), callbackId);
-                return current;
+                return payment(paymentId, current.userId());
             }
             if (!"PROCESSING".equals(current.status()) && !"UNKNOWN".equals(current.status())) {
                 if (current.status().equals(result.status().name())) {
@@ -139,15 +141,18 @@ public class EventPaymentService {
                 throw conflict("Payment cannot accept this result in its current state");
             }
             String next = result.status().name();
-            String recovery = result.status() == GatewayResultStatus.PROCESSING ? "AUTO" : "NONE";
-            String detail = null;
+            String recovery = switch (result.status()) {
+                case SUCCEEDED -> "NONE";
+                case FAILED -> "MANUAL_REQUIRED";
+                case PROCESSING -> "AUTO";
+            };
             if (result.status() == GatewayResultStatus.SUCCEEDED) {
                 if ("PENDING_PAYMENT".equals(order.status())) {
                     allocate(order);
                 } else if ("CLOSED".equals(order.status())) {
-                    // Visible, safe intermediate boundary until the authorized 6.6 increment.
-                    recovery = "MANUAL_REQUIRED";
-                    detail = "LATE_PAYMENT_COMPENSATION_NOT_IMPLEMENTED";
+                    // The durable intent is part of the same local commit as late success. The
+                    // provider refund is deliberately dispatched later, outside this transaction.
+                    recovery = "NONE";
                 } else {
                     throw conflict("Order cannot accept payment success");
                 }
@@ -156,12 +161,15 @@ public class EventPaymentService {
                     UPDATE et_payment SET status=?,provider_transaction_id=?,recovery_status=?,last_error=?,
                         succeeded_at=?,next_attempt_at=?,lease_token=NULL,lease_until=NULL,version=version+1
                     WHERE id=? AND version=? AND status=?
-                    """, next, result.providerTransactionId(), recovery, detail,
+                    """, next, result.providerTransactionId(), recovery, null,
                     result.status() == GatewayResultStatus.SUCCEEDED ? Timestamp.from(now()) : null,
                     "AUTO".equals(recovery) ? Timestamp.from(now().plusSeconds(5)) : null,
                     paymentId, current.version(), current.status()));
+            if (result.status() == GatewayResultStatus.SUCCEEDED && "CLOSED".equals(order.status())) {
+                ensureCompensationIntent(payment(paymentId, current.userId()));
+            }
             history(paymentId, current.status(), next,
-                    callbackId == null ? "GATEWAY_RESULT" : "CALLBACK_RESULT", detail, callbackId);
+                    callbackId == null ? "GATEWAY_RESULT" : "CALLBACK_RESULT", null, callbackId);
             if (callbackId != null) markCallbackApplied(callbackId);
             return payment(paymentId, current.userId());
         }));
@@ -219,13 +227,87 @@ public class EventPaymentService {
     PaymentView recoverClaim(RecoveryClaim claim) {
         requireNoTransaction();
         PaymentView payment = paymentById(claim.paymentId());
+        java.util.Optional<SimulatedPaymentGateway.GatewayPayment> result;
         try {
-            var result = gateway.queryPayment(payment.paymentNumber());
-            if (result.isPresent()) return applyResult(payment.id(), result.get());
-            return recordRecoveryMiss(payment.id(), claim.leaseToken(), "GATEWAY_PAYMENT_NOT_FOUND");
+            result = gateway.queryPayment(payment.paymentNumber());
         } catch (RuntimeException failure) {
             return recordRecoveryMiss(payment.id(), claim.leaseToken(), failure.getClass().getSimpleName());
         }
+        if (result.isPresent()) return applyResult(payment.id(), result.get());
+        return recordRecoveryMiss(payment.id(), claim.leaseToken(), "GATEWAY_PAYMENT_NOT_FOUND");
+    }
+
+    public PaymentView refresh(long paymentId, long userId) {
+        requireNoTransaction();
+        PaymentView payment = payment(paymentId, userId);
+        var result = gateway.queryPayment(payment.paymentNumber());
+        return result.isPresent() ? applyResult(payment.id(), result.get()) : payment(paymentId, userId);
+    }
+
+    public PaymentView manualRetry(long paymentId, long actorId, String operationKey, String reason) {
+        requireNoTransaction();
+        validateOperation(operationKey, reason);
+        PaymentView reference = paymentById(paymentId);
+        String requestHash = hashOperation(paymentId, reason);
+        ManualDecision decision = required(transactions.execute(tx -> {
+            LockedOrder order = lockOrder(reference.orderId());
+            PaymentView current = lockPayment(paymentId);
+            var prior = db.query("SELECT payment_id,request_hash FROM et_payment_history WHERE actor_id=? AND operation_key=?",
+                    (rs, row) -> new Object[]{rs.getLong(1), rs.getString(2)}, actorId, operationKey);
+            if (!prior.isEmpty()) {
+                Object[] value = prior.getFirst();
+                if (((Number) value[0]).longValue() != paymentId || !requestHash.equals(value[1])) {
+                    throw conflict("Operator idempotency key was reused with a different request");
+                }
+                return new ManualDecision(true, eligibleForNewCharge(order));
+            }
+            if ("SUCCEEDED".equals(current.status())) {
+                if ("CLOSED".equals(order.status())) ensureCompensationIntent(current);
+                history(paymentId, current.status(), current.status(), "PAYMENT_MANUAL_RETRY", reason, null,
+                        actorId, operationKey, requestHash);
+                return new ManualDecision(false, false);
+            } else {
+                if (!"FAILED".equals(current.status()) && !"MANUAL_REQUIRED".equals(current.recoveryStatus())) {
+                    throw conflict("Payment is not awaiting manual recovery");
+                }
+                boolean maySubmit = eligibleForNewCharge(order);
+                if (maySubmit) {
+                    changed(db.update("UPDATE et_payment SET status='PROCESSING',recovery_status='AUTO',next_attempt_at=?,last_error=NULL,"
+                                    + "lease_token=NULL,lease_until=NULL,version=version+1 WHERE id=? AND version=?",
+                            Timestamp.from(now()), paymentId, current.version()));
+                }
+                history(paymentId, current.status(), maySubmit ? "PROCESSING" : current.status(),
+                        "PAYMENT_MANUAL_RETRY", reason, null,
+                        actorId, operationKey, requestHash);
+                return new ManualDecision(false, maySubmit);
+            }
+        }));
+        PaymentView afterAudit = paymentById(paymentId);
+        if ("SUCCEEDED".equals(afterAudit.status()) || decision.replay() && "FAILED".equals(afterAudit.status())) {
+            return afterAudit;
+        }
+        var found = gateway.queryPayment(reference.paymentNumber());
+        if (found.isPresent() && found.get().status() != GatewayResultStatus.FAILED) {
+            return applyResult(paymentId, found.get());
+        }
+        if (!decision.maySubmit()) {
+            return found.isPresent() ? applyResult(paymentId, found.get()) : afterAudit;
+        }
+        SimulatedPaymentGateway.GatewayPayment submitted;
+        try {
+            String orderNumber = required(db.queryForObject("SELECT order_number FROM et_order WHERE id=?",
+                    String.class, reference.orderId()));
+            submitted = gateway.createPayment(new SimulatedPaymentGateway.PaymentRequest(reference.paymentNumber(),
+                    orderNumber, reference.amount(), reference.currency()));
+        } catch (RuntimeException uncertain) {
+            markRecoveryUnknown(paymentId, uncertain.getClass().getSimpleName());
+            return paymentById(paymentId);
+        }
+        return applyResult(paymentId, submitted);
+    }
+
+    private boolean eligibleForNewCharge(LockedOrder order) {
+        return "PENDING_PAYMENT".equals(order.status()) && now().isBefore(order.deadline());
     }
 
     private PaymentView recordRecoveryMiss(long paymentId, String token, String detail) {
@@ -285,6 +367,38 @@ public class EventPaymentService {
         if (violations == null || violations != 0) throw new IllegalStateException("Inventory conservation violated");
     }
 
+    private void ensureCompensationIntent(PaymentView payment) {
+        var existing = db.queryForList("SELECT id FROM et_refund WHERE payment_id=?", Long.class, payment.id());
+        if (existing.isEmpty()) {
+            long refundId = IdWorker.getId();
+            db.update("""
+                    INSERT INTO et_refund(id,refund_number,payment_id,reason,amount,currency,status,
+                        recovery_status,attempts,next_attempt_at)
+                    VALUES (?, ?,?,'LATE_PAYMENT',?,?,'REQUESTED','AUTO',0,?)
+                    """, refundId, "ER" + refundId, payment.id(), payment.amount(), payment.currency(), Timestamp.from(now()));
+            db.update("""
+                    INSERT INTO et_payment_history(id,payment_id,refund_id,action,from_status,to_status,source,detail)
+                    VALUES (?,?,?,'LATE_REFUND_REQUESTED',NULL,'REQUESTED','PAYMENT_SERVICE','ORDER_ALREADY_CLOSED')
+                    """, IdWorker.getId(), payment.id(), refundId);
+        }
+        if (!"NONE".equals(payment.recoveryStatus()) || payment.lastError() != null) {
+            db.update("UPDATE et_payment SET recovery_status='NONE',last_error=NULL,next_attempt_at=NULL,"
+                    + "lease_token=NULL,lease_until=NULL,version=version+1 WHERE id=?", payment.id());
+        }
+    }
+
+    private void markRecoveryUnknown(long paymentId, String detail) {
+        PaymentView reference = paymentById(paymentId);
+        transactions.executeWithoutResult(tx -> {
+            lockOrder(reference.orderId());
+            PaymentView current = lockPayment(paymentId);
+            if ("SUCCEEDED".equals(current.status()) || "FAILED".equals(current.status())) return;
+            db.update("UPDATE et_payment SET status='UNKNOWN',recovery_status='AUTO',last_error=?,next_attempt_at=?,"
+                    + "lease_token=NULL,lease_until=NULL,version=version+1 WHERE id=?", bounded(detail),
+                    Timestamp.from(now().plusSeconds(5)), paymentId);
+        });
+    }
+
     private void validateResult(LockedOrder order, PaymentView payment, SimulatedPaymentGateway.GatewayPayment result) {
         if (result == null || result.status() == null || !"simulated".equals(payment.provider())
                 || order.id() != payment.orderId() || order.userId() != payment.userId()
@@ -326,10 +440,12 @@ public class EventPaymentService {
         }
     }
 
-    private void lockReceivedCallback(long callbackId) {
+    private boolean lockCallbackForApply(long callbackId) {
         String status = required(db.queryForObject("SELECT status FROM et_payment_callback WHERE id=? FOR UPDATE",
                 String.class, callbackId));
+        if ("APPLIED".equals(status)) return false;
         if (!"RECEIVED".equals(status)) throw conflict("Callback receipt is no longer applicable");
+        return true;
     }
 
     private void markCallbackApplied(long callbackId) {
@@ -350,11 +466,17 @@ public class EventPaymentService {
     }
 
     private void history(long id, String before, String after, String action, String detail, Long callbackId) {
+        history(id, before, after, action, detail, callbackId, null, null, null);
+    }
+
+    private void history(long id, String before, String after, String action, String detail, Long callbackId,
+            Long actorId, String operationKey, String requestHash) {
         String source = callbackId == null ? "PAYMENT_SERVICE" : "PAYMENT_CALLBACK";
         db.update("""
-                INSERT INTO et_payment_history(id,payment_id,callback_id,action,from_status,to_status,source,detail)
-                VALUES (?,?,?,?,?,?,?,?)
-                """, IdWorker.getId(), id, callbackId, action, before, after, source, detail);
+                INSERT INTO et_payment_history(id,payment_id,callback_id,action,from_status,to_status,source,
+                    actor_id,operation_key,request_hash,detail)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                """, IdWorker.getId(), id, callbackId, action, before, after, source, actorId, operationKey, requestHash, detail);
     }
 
     private PaymentView map(ResultSet rs) throws SQLException {
@@ -389,6 +511,26 @@ public class EventPaymentService {
         }
     }
 
+    private static String hashOperation(long id, String reason) {
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                    .digest((id + ":" + reason).getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException impossible) {
+            throw new IllegalStateException(impossible);
+        }
+    }
+
+    private static void validateOperation(String key, String reason) {
+        validateKey(key);
+        if (reason == null || reason.isBlank() || reason.length() > 255) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "A reason of 1 to 255 characters is required");
+        }
+    }
+
+    private static String bounded(String detail) {
+        return detail == null ? null : detail.substring(0, Math.min(255, detail.length()));
+    }
+
     private static ResponseStatusException conflict(String message) {
         return new ResponseStatusException(HttpStatus.CONFLICT, message);
     }
@@ -400,6 +542,7 @@ public class EventPaymentService {
     private static <T> T required(T value) { return Objects.requireNonNull(value, "Missing transaction result"); }
 
     private record Prepared(PaymentView payment, String orderNumber, boolean created) {}
+    private record ManualDecision(boolean replay, boolean maySubmit) {}
     private record LockedOrder(long id, String number, long userId, long tierId, int quantity,
             long amount, String currency, String status, Instant deadline) {}
     public record PaymentView(long id, String paymentNumber, long orderId, long userId, String provider,

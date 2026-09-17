@@ -4,17 +4,12 @@ Date: 2026-09-16
 
 Baseline reviewed: `5bbf8c8` (checklist 0–5).
 
-Status: sections 6.1–6.5 prepared in source. On 2026-09-17, the scoped 6.4
-IDEA runs passed: 10 H2 payment, 10 MySQL payment and 8 order regression tests;
-the final 6.5 extended payment suites each completed 14 tests without failures.
-Section 6.1 froze this design. Section 6.2 adds the V6 storage contract and
-section 6.3 adds the independent simulated-gateway boundary. Section 6.4 adds
-local orchestration/result transactions. Section 6.5 adds receipt-based callbacks
-and query recovery. Refund compensation, HTTP endpoints and full item-6 runtime
-acceptance remain later slices.
-Where the broader state-machine/API documents describe future capabilities,
-the narrower decisions here govern this increment. Update those documents when
-the corresponding implementation is delivered.
+Status: checklist item 6 is implemented in the current review candidate. On
+2026-09-17, IDEA runs with Microsoft OpenJDK 21.0.7 passed 26 H2 payment tests,
+26 MySQL 8.4 payment-boundary tests, and 7 controller/security test methods,
+with no failures or skips. The complete evidence and explicit limitations are in
+[the 0-6 verification record](../verification/CHECKLIST-0-6.md). The candidate
+remains uncommitted pending user review.
 
 ## Scope and invariants
 
@@ -35,7 +30,7 @@ the corresponding implementation is delivered.
 - No user-requested refunds, notifications, MQ changes, generalized
   reconciliation framework, benchmark, or section-7 demo script in this increment.
 
-## Storage contract for the future V6 migration
+## V6 storage contract
 
 Use InnoDB, BIGINT identifiers and integer-fen amounts, UTC timestamps, explicit
 foreign keys within each boundary, and database CHECK constraints for states,
@@ -177,9 +172,10 @@ cancel of `PAID` still returns 409.
   responses cannot overwrite `SUCCEEDED`. Contradictory terminal evidence is
   retained for manual inspection rather than forcing a state regression.
 
-Proposed configurable defaults: scan every 1 second, batch 100, retry delay 5
-seconds, lease 30 seconds, maximum 5 automatic attempts including the initial
-request. These are design settings, not measured recovery guarantees. Index
+Implemented recovery values are a 1-second scan interval, batch 100, 5-second
+retry delay, 30-second lease, and at most 5 attempts including the initial
+request. The scan interval and batch size are configurable; the other values are
+currently code constants, not measured recovery guarantees. Index
 `(recovery_status, next_attempt_at, id)`; expired leases can be reclaimed after
 restart. Startup and periodic scanning use the same persistent query. A claim
 increments attempts and moves next-attempt time to its lease deadline so a crash
@@ -218,7 +214,7 @@ as well. Previously applied identical receipts are acknowledged without another
 inventory/refund effect. Response acknowledgment follows committed application
 or durable rejection/unmatched recording.
 
-Planned routes, following the existing response envelope:
+Implemented routes, following the existing response envelope:
 
 - `POST /api/v1/orders/{orderId}/payments`: owned create, `Idempotency-Key` required.
 - `GET /api/v1/payments/{paymentId}`: owned local status, with no mutation.
@@ -240,14 +236,14 @@ fault switches, refund-create endpoint, or global response-envelope rewrite.
 
 ## Implementation slices and acceptance gates
 
-1. 6.2: `V6__event_payments.sql` now implements the storage contract. The existing
+1. 6.2: `V6__event_payments.sql` implements the storage contract. The existing
    real-MySQL infrastructure test now expects V1 through V6. On 2026-09-17,
-   `EventPaymentServiceIT` verified all six migrations on a clean MySQL 8.4
+   `PaymentBoundaryIT` verified all six migrations on a clean MySQL 8.4
    database; `InfrastructureIT` itself was not rerun in this verification.
-2. 6.3: `JdbcSimulatedPaymentGateway` now provides the simulated-gateway
+2. 6.3: `JdbcSimulatedPaymentGateway` provides the simulated-gateway
    interface/implementation and post-commit response-loss wrapper. Its focused
-   unit tests verify that payment and refund results survive a lost response and
-   caller rollback; execution remains pending IDEA verification.
+   tests verify that payment and refund results survive a lost response and
+   caller rollback.
 3. 6.4: `EventPaymentService` now provides local payment orchestration/result
    transactions; `EventOrderService` treats a paid expiry candidate as a no-op.
    See [the scoped verification record](../verification/CHECKLIST-6-4.md).
@@ -256,21 +252,22 @@ fault switches, refund-create endpoint, or global response-envelope rewrite.
    payment state. `PaymentRecoveryScanner` claims and queries durable
    `PROCESSING`/`UNKNOWN` payment work and retries received receipts after a
    business-transaction crash. See [the scoped verification record](../verification/CHECKLIST-6-5.md).
-5. 6.6: add unique compensation intent, refund execution/recovery and manual retry.
-6. 6.7: add controllers/security rules and ownership/signature/idempotency tests.
-7. 6.8: real-MySQL `PaymentBoundaryIT`, using bounded latches and fault injection.
-   Force each winner by pausing after its real order lock is acquired, starting
-   the competing path, and releasing the winner to commit. Include cancellation
-   and expiry, stale expiry selection, concurrent callbacks, local rollback after
-   gateway success, recovery after restart, refund response loss, exhausted/manual
-   recovery, and a new buyer reserving the released ticket before late payment.
-   Assert all order/reservation/payment/refund states, exact inventory counters,
-   unique provider effects, and successful replay. Never use sleep to select a winner.
-8. 6.9: final static review and user-run IDEA tests with Microsoft OpenJDK 21;
-   extend `CHECKLIST-0-5.md` into `CHECKLIST-0-6.md` and update both READMEs only
-   with actual evidence. Preserve historical results as historical.
+5. 6.6: `EventRefundService` creates the unique late-payment compensation intent
+   in the payment-result transaction, then executes/query-recovers the refund by
+   its original number outside that transaction. Failures remain queryable and
+   require an audited idempotent operator retry.
+6. 6.7: payment, compensation-refund, exact simulated-callback, and bounded ADMIN
+   recovery controllers are implemented. Ownership, callback signature/raw-body
+   handling, and the exact public security matcher have focused tests.
+7. 6.8: `PaymentBoundaryIT` runs the shared 26-case contract on real MySQL 8.4.
+   Bounded latches, real row-lock hooks, candidate-selection hooks, and post-commit
+   fault injection force both race winners, response loss, callback/recovery
+   duplication, local rollback after gateway success, restart recovery, exhausted
+   manual recovery, and resale before late payment. No sleep selects a winner.
+8. 6.9: static review, IDEA compilation, the H2/MySQL/controller/security runs,
+   `CHECKLIST-0-6.md`, both READMEs, and the broader API/state-machine documents
+   now record only the observed evidence and current boundaries.
 
-Sections 6.1–6.4 require static review and their listed IDEA tests before
-acceptance. Their implementation does not mark
-checklist 6 accepted. The remaining slices require separate implementation
-authorization; commit and push still require explicit user approval.
+The implementation deliberately stops at item 6. It adds no user-created refunds,
+notifications, MQ events, general reconciliation framework, benchmark, or item-7
+demo/delivery work. Commit and push still require explicit user approval.
