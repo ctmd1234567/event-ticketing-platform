@@ -75,6 +75,14 @@ public class EventPaymentService {
         }
     }
 
+    PaymentView paymentByNumber(String paymentNumber) {
+        try {
+            return db.queryForObject("SELECT * FROM et_payment WHERE payment_number=?", (rs, row) -> map(rs), paymentNumber);
+        } catch (EmptyResultDataAccessException absent) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Payment not found");
+        }
+    }
+
     private Prepared prepare(long orderId, long userId, String key) {
         LockedOrder order = lockOrder(orderId);
         if (order.userId() != userId) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Order not found");
@@ -95,26 +103,39 @@ public class EventPaymentService {
                 VALUES (?,?,?,?,'simulated',?,?,?,?,'PROCESSING',1,'AUTO',?)
                 """, id, "EP" + id, orderId, userId, key, hash(orderId), order.amount(), order.currency(),
                 Timestamp.from(now().plusSeconds(30)));
-        history(id, null, "PROCESSING", "PAYMENT_STARTED", null);
+        history(id, null, "PROCESSING", "PAYMENT_STARTED", null, null);
         return new Prepared(payment(id, userId), order.number(), true);
     }
 
     // Package-private: only trusted gateway results may reach this seam. It is not a callback API.
     PaymentView applyResult(long paymentId, SimulatedPaymentGateway.GatewayPayment result) {
+        return applyResult(paymentId, result, null);
+    }
+
+    PaymentView applyCallbackResult(long paymentId, SimulatedPaymentGateway.GatewayPayment result, long callbackId) {
+        return applyResult(paymentId, result, callbackId);
+    }
+
+    private PaymentView applyResult(long paymentId, SimulatedPaymentGateway.GatewayPayment result, Long callbackId) {
         requireNoTransaction();
         long orderId = required(db.queryForObject("SELECT order_id FROM et_payment WHERE id=?", Long.class, paymentId));
         return required(transactions.execute(tx -> {
             LockedOrder order = lockOrder(orderId);
             PaymentView current = lockPayment(paymentId);
+            if (callbackId != null) lockReceivedCallback(callbackId);
             validateResult(order, current, result);
             if ("SUCCEEDED".equals(current.status())) {
                 if (result.status() != GatewayResultStatus.SUCCEEDED) {
                     throw conflict("Contradictory result for a successful payment");
                 }
+                if (callbackId != null) acknowledgeTerminalCallback(paymentId, current.status(), callbackId);
                 return current;
             }
             if (!"PROCESSING".equals(current.status()) && !"UNKNOWN".equals(current.status())) {
-                if (current.status().equals(result.status().name())) return current;
+                if (current.status().equals(result.status().name())) {
+                    if (callbackId != null) acknowledgeTerminalCallback(paymentId, current.status(), callbackId);
+                    return current;
+                }
                 throw conflict("Payment cannot accept this result in its current state");
             }
             String next = result.status().name();
@@ -139,8 +160,89 @@ public class EventPaymentService {
                     result.status() == GatewayResultStatus.SUCCEEDED ? Timestamp.from(now()) : null,
                     "AUTO".equals(recovery) ? Timestamp.from(now().plusSeconds(5)) : null,
                     paymentId, current.version(), current.status()));
-            history(paymentId, current.status(), next, "GATEWAY_RESULT", detail);
+            history(paymentId, current.status(), next,
+                    callbackId == null ? "GATEWAY_RESULT" : "CALLBACK_RESULT", detail, callbackId);
+            if (callbackId != null) markCallbackApplied(callbackId);
             return payment(paymentId, current.userId());
+        }));
+    }
+
+    record RecoveryClaim(long paymentId, String leaseToken) {}
+
+    java.util.List<RecoveryClaim> claimDueRecoveries(int requestedBatchSize) {
+        requireNoTransaction();
+        int batchSize = Math.max(1, Math.min(requestedBatchSize, 100));
+        return required(transactions.execute(tx -> {
+            Instant clock = now();
+            var ids = db.queryForList("""
+                    SELECT id FROM et_payment
+                    WHERE recovery_status='AUTO' AND status IN ('PROCESSING','UNKNOWN')
+                      AND ((next_attempt_at IS NOT NULL AND next_attempt_at<=?)
+                           OR (lease_until IS NOT NULL AND lease_until<=?))
+                    ORDER BY id LIMIT %d
+                    """.formatted(batchSize), Long.class, Timestamp.from(clock), Timestamp.from(clock));
+            var claims = new java.util.ArrayList<RecoveryClaim>();
+            for (Long id : ids) {
+                var row = db.queryForMap("""
+                        SELECT attempts,version,status,recovery_status,next_attempt_at,lease_until
+                        FROM et_payment WHERE id=? FOR UPDATE
+                        """, id);
+                if (!eligibleForRecovery(row, clock)) continue;
+                int attempts = ((Number) row.get("attempts")).intValue();
+                int version = ((Number) row.get("version")).intValue();
+                if (attempts >= 5) {
+                    db.update("UPDATE et_payment SET recovery_status='MANUAL_REQUIRED',next_attempt_at=NULL,"
+                            + "lease_token=NULL,lease_until=NULL,last_error='RECOVERY_ATTEMPTS_EXHAUSTED',version=version+1"
+                            + " WHERE id=? AND version=?", id, version);
+                    history(id, null, null, "RECOVERY_EXHAUSTED", "RECOVERY_ATTEMPTS_EXHAUSTED", null);
+                    continue;
+                }
+                String token = java.util.UUID.randomUUID().toString();
+                int changed = db.update("""
+                        UPDATE et_payment SET attempts=attempts+1,lease_token=?,lease_until=?,next_attempt_at=?,version=version+1
+                        WHERE id=? AND version=? AND recovery_status='AUTO' AND status IN ('PROCESSING','UNKNOWN')
+                        """, token, Timestamp.from(clock.plusSeconds(30)), Timestamp.from(clock.plusSeconds(30)), id, version);
+                if (changed == 1) claims.add(new RecoveryClaim(id, token));
+            }
+            return claims;
+        }));
+    }
+
+    private static boolean eligibleForRecovery(java.util.Map<String, Object> row, Instant clock) {
+        if (!"AUTO".equals(row.get("recovery_status"))
+                || !("PROCESSING".equals(row.get("status")) || "UNKNOWN".equals(row.get("status")))) return false;
+        Timestamp next = (Timestamp) row.get("next_attempt_at");
+        Timestamp lease = (Timestamp) row.get("lease_until");
+        return (next != null && !next.toInstant().isAfter(clock)) || (lease != null && !lease.toInstant().isAfter(clock));
+    }
+
+    PaymentView recoverClaim(RecoveryClaim claim) {
+        requireNoTransaction();
+        PaymentView payment = paymentById(claim.paymentId());
+        try {
+            var result = gateway.queryPayment(payment.paymentNumber());
+            if (result.isPresent()) return applyResult(payment.id(), result.get());
+            return recordRecoveryMiss(payment.id(), claim.leaseToken(), "GATEWAY_PAYMENT_NOT_FOUND");
+        } catch (RuntimeException failure) {
+            return recordRecoveryMiss(payment.id(), claim.leaseToken(), failure.getClass().getSimpleName());
+        }
+    }
+
+    private PaymentView recordRecoveryMiss(long paymentId, String token, String detail) {
+        PaymentView reference = paymentById(paymentId);
+        return required(transactions.execute(tx -> {
+            lockOrder(reference.orderId());
+            PaymentView current = lockPayment(paymentId);
+            if (!"PROCESSING".equals(current.status()) && !"UNKNOWN".equals(current.status())) return current;
+            String leaseCondition = token == null ? "" : " AND lease_token=?";
+            Object[] args = token == null
+                    ? new Object[]{detail, Timestamp.from(now().plusSeconds(5)), paymentId, current.version()}
+                    : new Object[]{detail, Timestamp.from(now().plusSeconds(5)), paymentId, current.version(), token};
+            int changed = db.update("UPDATE et_payment SET status='UNKNOWN',last_error=?,next_attempt_at=?,"
+                    + "lease_token=NULL,lease_until=NULL,version=version+1 WHERE id=? AND version=?" + leaseCondition, args);
+            if (changed == 0) return paymentById(paymentId);
+            history(paymentId, current.status(), "UNKNOWN", "RECOVERY_QUERY_MISS", detail, null);
+            return paymentById(paymentId);
         }));
     }
 
@@ -156,7 +258,7 @@ public class EventPaymentService {
                     UPDATE et_payment SET status='UNKNOWN',last_error=?,next_attempt_at=?,version=version+1
                     WHERE id=? AND status='PROCESSING' AND version=?
                     """, detail, Timestamp.from(now().plusSeconds(5)), paymentId, current.version()));
-            history(paymentId, current.status(), "UNKNOWN", "GATEWAY_UNCERTAIN", detail);
+            history(paymentId, current.status(), "UNKNOWN", "GATEWAY_UNCERTAIN", detail, null);
         });
     }
 
@@ -216,17 +318,43 @@ public class EventPaymentService {
         return required(db.queryForObject("SELECT * FROM et_payment WHERE id=? FOR UPDATE", (rs, row) -> map(rs), id));
     }
 
+    private PaymentView paymentById(long paymentId) {
+        try {
+            return db.queryForObject("SELECT * FROM et_payment WHERE id=?", (rs, row) -> map(rs), paymentId);
+        } catch (EmptyResultDataAccessException absent) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Payment not found");
+        }
+    }
+
+    private void lockReceivedCallback(long callbackId) {
+        String status = required(db.queryForObject("SELECT status FROM et_payment_callback WHERE id=? FOR UPDATE",
+                String.class, callbackId));
+        if (!"RECEIVED".equals(status)) throw conflict("Callback receipt is no longer applicable");
+    }
+
+    private void markCallbackApplied(long callbackId) {
+        changed(db.update("UPDATE et_payment_callback SET status='APPLIED',recovery_status='NONE',"
+                + "next_attempt_at=NULL,applied_at=?,last_error=NULL WHERE id=? AND status='RECEIVED'",
+                Timestamp.from(now()), callbackId));
+    }
+
+    private void acknowledgeTerminalCallback(long paymentId, String status, long callbackId) {
+        history(paymentId, status, status, "CALLBACK_CONFIRMED_TERMINAL", null, callbackId);
+        markCallbackApplied(callbackId);
+    }
+
     private PaymentView replay(PaymentView existing, long orderId, String key) {
         if (existing.orderId() != orderId || !existing.idempotencyKey().equals(key)
                 || !existing.requestHash().equals(hash(orderId))) throw conflict("Payment idempotency conflict");
         return existing;
     }
 
-    private void history(long id, String before, String after, String action, String detail) {
+    private void history(long id, String before, String after, String action, String detail, Long callbackId) {
+        String source = callbackId == null ? "PAYMENT_SERVICE" : "PAYMENT_CALLBACK";
         db.update("""
-                INSERT INTO et_payment_history(id,payment_id,action,from_status,to_status,source,detail)
-                VALUES (?,?,?,?,?,'PAYMENT_SERVICE',?)
-                """, IdWorker.getId(), id, action, before, after, detail);
+                INSERT INTO et_payment_history(id,payment_id,callback_id,action,from_status,to_status,source,detail)
+                VALUES (?,?,?,?,?,?,?,?)
+                """, IdWorker.getId(), id, callbackId, action, before, after, source, detail);
     }
 
     private PaymentView map(ResultSet rs) throws SQLException {

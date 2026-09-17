@@ -104,6 +104,13 @@ app:
     payment-status: ${SIM_GATEWAY_PAYMENT_STATUS:SUCCEEDED}
     refund-status: ${SIM_GATEWAY_REFUND_STATUS:SUCCEEDED}
     fault-after-commit-once: ${SIM_GATEWAY_FAULT_AFTER_COMMIT_ONCE:NONE}
+    # Intentionally empty by default: callbacks are unavailable until an operator supplies a secret.
+    callback-secret: ${SIM_GATEWAY_CALLBACK_SECRET:}
+    callback-freshness-seconds: ${SIM_GATEWAY_CALLBACK_FRESHNESS_SECONDS:300}
+  payment-recovery:
+    enabled: ${PAYMENT_RECOVERY_ENABLED:true}
+    interval-ms: ${PAYMENT_RECOVERY_INTERVAL_MS:1000}
+    batch-size: ${PAYMENT_RECOVERY_BATCH_SIZE:100}
   security:
     admin-user-ids: ${ADMIN_USER_IDS:}
     session-ttl-seconds: ${SESSION_TTL_SECONDS:1800}

@@ -4,12 +4,14 @@ Date: 2026-09-16
 
 Baseline reviewed: `5bbf8c8` (checklist 0–5).
 
-Status: sections 6.1–6.4 prepared in source. On 2026-09-17, the scoped 6.4
-IDEA runs passed: 10 H2 payment, 10 MySQL payment and 8 order regression tests.
+Status: sections 6.1–6.5 prepared in source. On 2026-09-17, the scoped 6.4
+IDEA runs passed: 10 H2 payment, 10 MySQL payment and 8 order regression tests;
+the final 6.5 extended payment suites each completed 14 tests without failures.
 Section 6.1 froze this design. Section 6.2 adds the V6 storage contract and
 section 6.3 adds the independent simulated-gateway boundary. Section 6.4 adds
-local orchestration/result transactions. Callbacks, query recovery, refund
-compensation, HTTP endpoints and full item-6 runtime acceptance remain later slices.
+local orchestration/result transactions. Section 6.5 adds receipt-based callbacks
+and query recovery. Refund compensation, HTTP endpoints and full item-6 runtime
+acceptance remain later slices.
 Where the broader state-machine/API documents describe future capabilities,
 the narrower decisions here govern this increment. Update those documents when
 the corresponding implementation is delivered.
@@ -249,7 +251,11 @@ fault switches, refund-create endpoint, or global response-envelope rewrite.
 3. 6.4: `EventPaymentService` now provides local payment orchestration/result
    transactions; `EventOrderService` treats a paid expiry candidate as a no-op.
    See [the scoped verification record](../verification/CHECKLIST-6-4.md).
-4. 6.5: add callback verification/receipts, query recovery and persistent scanner.
+4. 6.5: `PaymentCallbackService` now authenticates signed simulated payment
+   callbacks, persists idempotent receipts, and applies them atomically with
+   payment state. `PaymentRecoveryScanner` claims and queries durable
+   `PROCESSING`/`UNKNOWN` payment work and retries received receipts after a
+   business-transaction crash. See [the scoped verification record](../verification/CHECKLIST-6-5.md).
 5. 6.6: add unique compensation intent, refund execution/recovery and manual retry.
 6. 6.7: add controllers/security rules and ownership/signature/idempotency tests.
 7. 6.8: real-MySQL `PaymentBoundaryIT`, using bounded latches and fault injection.

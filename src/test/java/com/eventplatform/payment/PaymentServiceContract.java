@@ -13,8 +13,12 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.server.ResponseStatusException;
 
 import javax.sql.DataSource;
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
+import java.nio.charset.StandardCharsets;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
@@ -32,6 +36,7 @@ abstract class PaymentServiceContract {
     private GateJdbc db;
     private EventOrderService orders;
     private EventPaymentService payments;
+    private PaymentCallbackService callbacks;
     private SimulatedPaymentGateway gateway;
     private GatewayResponseFaultInjector faults;
     private TransactionTemplate local;
@@ -49,6 +54,7 @@ abstract class PaymentServiceContract {
         gateway = spy(new JdbcSimulatedPaymentGateway(db, manager,
                 new ConfiguredSimulatedGatewayOutcomePolicy("SUCCEEDED", "SUCCEEDED"), faults));
         payments = new EventPaymentService(db, manager, gateway);
+        callbacks = new PaymentCallbackService(db, manager, payments, "callback-test-secret", 300);
         var catalog = new EventCatalogService(db);
         Instant now = Instant.now();
         long event = catalog.createEvent(1, "Payment fixture", null, "Test venue");
@@ -130,6 +136,9 @@ abstract class PaymentServiceContract {
         var rejected = new SimulatedPaymentGateway.GatewayPayment(processing.paymentNumber(), order.orderNumber(),
                 4750, "CNY", GatewayResultStatus.FAILED, processing.providerTransactionId(), Instant.now(), Instant.now());
         assertThat(payments.applyResult(processing.id(), rejected).status()).isEqualTo("FAILED");
+        Instant callbackTime = Instant.now();
+        var failedCallback = callback("event-confirm-failed", rejected, callbackTime, "{\"event\":\"failed\"}");
+        assertThat(callbacks.receive(failedCallback).status()).isEqualTo("APPLIED");
         payments.markUnknown(processing.id(), 7, "stale timeout");
         assertThat(payments.payment(processing.id(), 7).status()).isEqualTo("FAILED");
         assertPending();
@@ -230,6 +239,110 @@ abstract class PaymentServiceContract {
         assertThat(db.queryForObject("SELECT COUNT(*) FROM et_refund WHERE payment_id=?", Integer.class, late.id())).isZero();
     }
 
+    @Test
+    void signedCallbackHasDurableIdempotentReceiptAndAppliesTrustedGatewaySuccess() {
+        faults.loseNextSuccessfulResponse(GatewayOperation.PAYMENT);
+        var unknown = payments.create(order.id(), 7, key);
+        var gatewayResult = gateway.queryPayment(unknown.paymentNumber()).orElseThrow();
+        Instant timestamp = Instant.now();
+        String raw = "{\"event\":\"callback-success\"}";
+        var command = callback("event-callback-1", gatewayResult, timestamp, raw);
+        var invalid = new PaymentCallbackService.CallbackCommand(command.provider(), "event-invalid-signature",
+                command.kind(), command.businessNumber(), command.providerResultId(), command.orderReference(),
+                command.amount(), command.currency(), command.status(), command.timestamp(), command.rawBody(), "00");
+        assertStatus(() -> callbacks.receive(invalid), HttpStatus.UNAUTHORIZED);
+        assertThat(db.queryForObject("SELECT COUNT(*) FROM et_payment_callback WHERE event_id=?", Integer.class,
+                "event-invalid-signature")).isZero();
+        var applied = callbacks.receive(command);
+        assertThat(applied.status()).isEqualTo("APPLIED");
+        assertPaid();
+        assertThat(callbacks.receive(command)).isEqualTo(applied);
+        assertThat(db.queryForObject("SELECT COUNT(*) FROM et_payment_history WHERE payment_id=?", Integer.class, unknown.id()))
+                .isEqualTo(3);
+        var changedPayload = callback("event-callback-1", gatewayResult, timestamp, "{\"event\":\"different\"}");
+        assertStatus(() -> callbacks.receive(changedPayload), HttpStatus.CONFLICT);
+    }
+
+    @Test
+    void recoveryClaimsQueryPersistedGatewayAndHandsOffExhaustedUncertainty() {
+        faults.loseNextSuccessfulResponse(GatewayOperation.PAYMENT);
+        var unknown = payments.create(order.id(), 7, key);
+        db.update("UPDATE et_payment SET next_attempt_at=? WHERE id=?", Timestamp.from(Instant.now().minusSeconds(1)), unknown.id());
+        var claims = payments.claimDueRecoveries(100);
+        var claim = claims.stream().filter(candidate -> candidate.paymentId() == unknown.id()).findFirst().orElseThrow();
+        assertThat(payments.recoverClaim(claim).status()).isEqualTo("SUCCEEDED");
+        assertPaid();
+
+        // This direct row setup isolates the bounded-handoff transition; it deliberately does not invoke result application.
+        db.update("UPDATE et_payment SET status='UNKNOWN',recovery_status='AUTO',attempts=5,next_attempt_at=? WHERE id=?",
+                Timestamp.from(Instant.now().minusSeconds(1)), unknown.id());
+        assertThat(payments.claimDueRecoveries(100)).isEmpty();
+        assertThat(payments.payment(unknown.id(), 7).recoveryStatus()).isEqualTo("MANUAL_REQUIRED");
+    }
+
+    @Test
+    void receivedCallbackIsRecoveredAfterItsBusinessTransactionRollsBack() {
+        faults.loseNextSuccessfulResponse(GatewayOperation.PAYMENT);
+        var unknown = payments.create(order.id(), 7, key);
+        var result = gateway.queryPayment(unknown.paymentNumber()).orElseThrow();
+        Instant timestamp = Instant.now();
+        var command = callback("event-receipt-recovery", result, timestamp, "{\"event\":\"recover\"}");
+        db.failResultHistory = true;
+        assertThatThrownBy(() -> callbacks.receive(command)).isInstanceOf(IllegalStateException.class);
+        long callbackId = db.queryForObject("SELECT id FROM et_payment_callback WHERE event_id=?", Long.class,
+                "event-receipt-recovery");
+        assertThat(callbacks.callback(callbackId).status()).isEqualTo("RECEIVED");
+        assertPending();
+        db.failResultHistory = false;
+        db.update("UPDATE et_payment_callback SET next_attempt_at=? WHERE id=?", Timestamp.from(Instant.now().minusSeconds(1)), callbackId);
+        callbacks.recoverDueReceipts(100);
+        assertThat(callbacks.callback(callbackId).status()).isEqualTo("APPLIED");
+        assertPaid();
+    }
+
+    @Test
+    void concurrentRecoveryScannersCannotClaimTheSamePaymentTwice() throws Exception {
+        faults.loseNextSuccessfulResponse(GatewayOperation.PAYMENT);
+        var unknown = payments.create(order.id(), 7, key);
+        db.update("UPDATE et_payment SET next_attempt_at=? WHERE id=?", Timestamp.from(Instant.now().minusSeconds(1)), unknown.id());
+        CountDownLatch bothSelected = new CountDownLatch(2);
+        CountDownLatch release = new CountDownLatch(1);
+        db.afterRecoveryCandidates.set(() -> { bothSelected.countDown(); await(release); });
+        var pool = Executors.newFixedThreadPool(2);
+        try {
+            var first = pool.submit(() -> payments.claimDueRecoveries(100));
+            var second = pool.submit(() -> payments.claimDueRecoveries(100));
+            await(bothSelected);
+            release.countDown();
+            long targetClaims = java.util.stream.Stream.concat(first.get(10, TimeUnit.SECONDS).stream(),
+                    second.get(10, TimeUnit.SECONDS).stream()).filter(c -> c.paymentId() == unknown.id()).count();
+            assertThat(targetClaims).isOne();
+            assertThat(db.queryForObject("SELECT attempts FROM et_payment WHERE id=?", Integer.class, unknown.id())).isEqualTo(2);
+        } finally {
+            release.countDown();
+            db.afterRecoveryCandidates.set(null);
+            pool.shutdownNow();
+        }
+    }
+
+    private static PaymentCallbackService.CallbackCommand callback(String eventId,
+            SimulatedPaymentGateway.GatewayPayment result, Instant timestamp, String rawBody) {
+        return new PaymentCallbackService.CallbackCommand("simulated", eventId, "PAYMENT", result.paymentNumber(),
+                result.providerTransactionId(), result.orderReference(), result.amount(), result.currency(), result.status(),
+                timestamp, rawBody, sign("callback-test-secret", timestamp, rawBody));
+    }
+
+    private static String sign(String secret, Instant timestamp, String rawBody) {
+        try {
+            Mac mac = Mac.getInstance("HmacSHA256");
+            mac.init(new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+            return HexFormat.of().formatHex(mac.doFinal((timestamp.getEpochSecond() + "." + rawBody)
+                    .getBytes(StandardCharsets.UTF_8)));
+        } catch (Exception impossible) {
+            throw new IllegalStateException(impossible);
+        }
+    }
+
     private void assertPaid() {
         assertThat(orders.order(order.id(), 7).status()).isEqualTo("PAID");
         assertThat(db.queryForObject("SELECT status FROM et_inventory_reservation WHERE order_id=?", String.class, order.id()))
@@ -268,6 +381,7 @@ abstract class PaymentServiceContract {
     private static final class GateJdbc extends JdbcTemplate {
         final AtomicReference<Runnable> afterOrderLock = new AtomicReference<>();
         final AtomicReference<Runnable> afterCandidates = new AtomicReference<>();
+        final AtomicReference<Runnable> afterRecoveryCandidates = new AtomicReference<>();
         boolean failResultHistory;
 
         GateJdbc(DataSource source) { super(source); }
@@ -285,16 +399,32 @@ abstract class PaymentServiceContract {
         @Override
         public <T> List<T> queryForList(String sql, Class<T> type) {
             List<T> result = super.queryForList(sql, type);
-            if (sql.contains("expiry_next_attempt_at")) {
-                Runnable hook = afterCandidates.getAndSet(null);
-                if (hook != null) hook.run();
-            }
+            afterCandidateQuery(sql);
             return result;
         }
 
         @Override
+        public <T> List<T> queryForList(String sql, Class<T> type, Object... args) {
+            List<T> result = super.queryForList(sql, type, args);
+            afterCandidateQuery(sql);
+            return result;
+        }
+
+        private void afterCandidateQuery(String sql) {
+            if (sql.contains("expiry_next_attempt_at")) {
+                Runnable hook = afterCandidates.getAndSet(null);
+                if (hook != null) hook.run();
+            }
+            if (sql.contains("FROM et_payment") && sql.contains("recovery_status='AUTO'")) {
+                Runnable hook = afterRecoveryCandidates.get();
+                if (hook != null) hook.run();
+            }
+        }
+
+        @Override
         public int update(String sql, Object... args) {
-            if (failResultHistory && sql.contains("INSERT INTO et_payment_history") && "GATEWAY_RESULT".equals(args[2])) {
+            if (failResultHistory && sql.contains("INSERT INTO et_payment_history")
+                    && ("GATEWAY_RESULT".equals(args[3]) || "CALLBACK_RESULT".equals(args[3]))) {
                 throw new IllegalStateException("Injected history persistence failure");
             }
             return super.update(sql, args);
