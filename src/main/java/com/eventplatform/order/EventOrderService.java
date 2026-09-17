@@ -205,6 +205,10 @@ public class EventOrderService {
             return false;
         }
         if (!"PENDING_PAYMENT".equals(order.status())) {
+            // A selected expiry candidate may have been paid before we acquired its lock.
+            if (requireExpired && "PAID".equals(order.status())) {
+                return false;
+            }
             throw new ResponseStatusException(HttpStatus.CONFLICT,
                     "The order cannot be canceled in its current state");
         }

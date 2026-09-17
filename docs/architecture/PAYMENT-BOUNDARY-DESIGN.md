@@ -4,11 +4,12 @@ Date: 2026-09-16
 
 Baseline reviewed: `5bbf8c8` (checklist 0–5).
 
-Status: sections 6.1–6.3 prepared in source; IDEA verification is pending.
+Status: sections 6.1–6.4 prepared in source. On 2026-09-17, the scoped 6.4
+IDEA runs passed: 10 H2 payment, 10 MySQL payment and 8 order regression tests.
 Section 6.1 froze this design. Section 6.2 adds the V6 storage contract and
-section 6.3 adds the independent simulated-gateway boundary. Payment
-orchestration, callbacks, local payment state transitions, refund compensation,
-and runtime acceptance remain later slices.
+section 6.3 adds the independent simulated-gateway boundary. Section 6.4 adds
+local orchestration/result transactions. Callbacks, query recovery, refund
+compensation, HTTP endpoints and full item-6 runtime acceptance remain later slices.
 Where the broader state-machine/API documents describe future capabilities,
 the narrower decisions here govern this increment. Update those documents when
 the corresponding implementation is delivered.
@@ -238,14 +239,16 @@ fault switches, refund-create endpoint, or global response-envelope rewrite.
 ## Implementation slices and acceptance gates
 
 1. 6.2: `V6__event_payments.sql` now implements the storage contract. The existing
-   real-MySQL infrastructure test now expects V1 through V6; user-run IDEA
-   verification is still required before treating the migration as accepted.
+   real-MySQL infrastructure test now expects V1 through V6. On 2026-09-17,
+   `EventPaymentServiceIT` verified all six migrations on a clean MySQL 8.4
+   database; `InfrastructureIT` itself was not rerun in this verification.
 2. 6.3: `JdbcSimulatedPaymentGateway` now provides the simulated-gateway
    interface/implementation and post-commit response-loss wrapper. Its focused
    unit tests verify that payment and refund results survive a lost response and
    caller rollback; execution remains pending IDEA verification.
-3. 6.4: add local payment orchestration/result transactions and minimally adjust
-   `EventOrderService` for the paid-order expiry no-op.
+3. 6.4: `EventPaymentService` now provides local payment orchestration/result
+   transactions; `EventOrderService` treats a paid expiry candidate as a no-op.
+   See [the scoped verification record](../verification/CHECKLIST-6-4.md).
 4. 6.5: add callback verification/receipts, query recovery and persistent scanner.
 5. 6.6: add unique compensation intent, refund execution/recovery and manual retry.
 6. 6.7: add controllers/security rules and ownership/signature/idempotency tests.
@@ -261,7 +264,7 @@ fault switches, refund-create endpoint, or global response-envelope rewrite.
    extend `CHECKLIST-0-5.md` into `CHECKLIST-0-6.md` and update both READMEs only
    with actual evidence. Preserve historical results as historical.
 
-Sections 6.1–6.3 are complete when the design, migration and isolated gateway
-boundary pass static review and their listed IDEA tests. They do not mark
+Sections 6.1–6.4 require static review and their listed IDEA tests before
+acceptance. Their implementation does not mark
 checklist 6 accepted. The remaining slices require separate implementation
 authorization; commit and push still require explicit user approval.

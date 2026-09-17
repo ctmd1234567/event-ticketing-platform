@@ -6,7 +6,7 @@ A modular-monolith transaction backend built with Java 21, Spring Boot, MySQL, R
 
 ## Current Implementation Scope
 
-The current baseline implements event, session, and ticket-tier creation, publication, and queries; synchronous owned-order creation with a server-side price snapshot and inventory reservation; unpaid-order cancellation; database-driven timeout closure; idempotent inventory release; and restart recovery scans. The source now includes the V6 payment schema and a persistent simulated gateway with an independent transaction boundary; IDEA/MySQL verification and integration with order payment orchestration are still pending. Local `UNKNOWN` recovery, callbacks, and late-payment compensation remain later increments.
+The current baseline implements event, session, and ticket-tier creation, publication, and queries; synchronous owned-order creation with a server-side price snapshot and inventory reservation; unpaid-order cancellation; database-driven timeout closure; idempotent inventory release; and restart recovery scans. Source now includes the V6 payment schema, an independently committed persistent simulated gateway, and slice 6.4 local payment orchestration: atomic successful-payment confirmation, lost responses recorded as `UNKNOWN`, and a paid-order expiry no-op. On 2026-09-17, IDEA with Microsoft OpenJDK 21.0.7 ran 10 H2 payment, 10 MySQL 8.4 payment integration, and 8 order regression tests: all passed, with exit code 0 for each class. Payment HTTP endpoints, automatic recovery, callbacks and compensation refunds are not implemented. A charge confirmed after closure is retained with a manual-handling marker, not refunded. See the [6.4 verification record](docs/verification/CHECKLIST-6-4.md); this is not full checklist-item-6 acceptance.
 
 ## Highlights
 
@@ -128,7 +128,7 @@ docker compose ps
 
 Default ports: MySQL `3307`, Redis `6380`, RabbitMQ `5673`, and RabbitMQ management UI `15673`.
 
-The current source contains Flyway `V1` through `V6`; V6 adds local payment/refund records and independent simulated-gateway result tables, and its real-MySQL migration verification is still pending. An existing local database may be baselined at version `2` only after confirming that it already contains the historical base tables and the order/Outbox upgrade; later migrations are then applied, and Flyway clean is disabled. Test seed data exists only under `src/test/resources` and is never loaded into the development database.
+The current source contains Flyway `V1` through `V6`; V6 adds local payment/refund records and independent simulated-gateway result tables. On 2026-09-17, `EventPaymentServiceIT` verified all six migrations on a clean MySQL 8.4 database. An existing local database may be baselined at version `2` only after confirming that it already contains the historical base tables and the order/Outbox upgrade; later migrations are then applied, and Flyway clean is disabled. Test seed data exists only under `src/test/resources` and is never loaded into the development database.
 
 ### 3. Start the application
 
