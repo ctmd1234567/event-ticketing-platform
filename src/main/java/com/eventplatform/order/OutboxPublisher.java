@@ -20,7 +20,8 @@ import java.util.Collections;
 import java.util.concurrent.TimeUnit;
 
 @Component
-@ConditionalOnProperty(name="app.outbox.enabled", havingValue="true", matchIfMissing=true)
+@org.springframework.context.annotation.Profile("legacy-experiment")
+@ConditionalOnProperty(name="app.outbox.enabled", havingValue="true")
 public class OutboxPublisher {
     private static final Logger log = LoggerFactory.getLogger(OutboxPublisher.class);
     private final JdbcTemplate db;

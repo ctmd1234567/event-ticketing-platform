@@ -21,6 +21,7 @@ services:
     volumes: ["redis-data:/data"]
   rabbitmq:
     image: rabbitmq:4.1-management-alpine
+    profiles: ["legacy-experiment"]
     ports: ["127.0.0.1:5673:5672", "127.0.0.1:15673:15672"]
     environment:
       RABBITMQ_DEFAULT_USER: event_app

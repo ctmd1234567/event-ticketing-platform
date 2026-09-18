@@ -11,6 +11,7 @@ import jakarta.annotation.Resource;
 
 @RestController
 @RequestMapping("/voucher-order")
+@org.springframework.context.annotation.Profile("legacy-experiment")
 public class VoucherOrderController {
     @Resource
     private com.eventplatform.security.RequestLimits limits;

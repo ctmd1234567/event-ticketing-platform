@@ -38,27 +38,6 @@ spring:
           max-idle: 15
           min-idle: 5
           time-between-eviction-runs: 10s
-  rabbitmq:
-    host: ${RABBITMQ_HOST:localhost}
-    port: ${RABBITMQ_PORT:5672}
-    username: ${RABBITMQ_USER:guest}
-    password: ${RABBITMQ_PASSWORD:guest}
-    publisher-confirm-type: correlated
-    publisher-returns: true
-    template:
-      mandatory: true
-    listener:
-      simple:
-        acknowledge-mode: auto
-        default-requeue-rejected: false
-        concurrency: ${RABBIT_CONSUMERS:4}
-        max-concurrency: ${RABBIT_MAX_CONSUMERS:16}
-        prefetch: ${RABBIT_PREFETCH:50}
-        retry:
-          enabled: true
-          initial-interval: 1s
-          max-attempts: 3
-          multiplier: 2
   flyway:
     enabled: ${FLYWAY_ENABLED:true}
     locations: classpath:db/migration
@@ -85,6 +64,9 @@ management:
   endpoint:
     health:
       show-details: never
+  health:
+    rabbit:
+      enabled: false
   metrics:
     tags:
       application: ${spring.application.name}
@@ -133,7 +115,7 @@ app:
       global-max: ${ORDER_GLOBAL_RATE_MAX:800}
       global-window-seconds: ${ORDER_GLOBAL_RATE_WINDOW_SECONDS:1}
   outbox:
-    enabled: true
+    enabled: false
     interval-ms: ${OUTBOX_INTERVAL_MS:50}
     batch-size: ${OUTBOX_BATCH_SIZE:500}
     lease-seconds: ${OUTBOX_LEASE_SECONDS:60}

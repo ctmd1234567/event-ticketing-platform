@@ -10,7 +10,8 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 
 @Component
-@ConditionalOnProperty(name="app.outbox.enabled", havingValue="true", matchIfMissing=true)
+@org.springframework.context.annotation.Profile("legacy-experiment")
+@ConditionalOnProperty(name="app.outbox.enabled", havingValue="true")
 public class OutboxMetrics {
     private final JdbcTemplate db;
     private final AtomicLong pending = new AtomicLong();

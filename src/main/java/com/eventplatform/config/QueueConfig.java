@@ -1,6 +1,7 @@
 package com.eventplatform.config;
 
 import org.springframework.amqp.core.*;
+import org.springframework.amqp.rabbit.annotation.EnableRabbit;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.amqp.rabbit.config.SimpleRabbitListenerContainerFactory;
@@ -8,6 +9,8 @@ import org.springframework.boot.autoconfigure.amqp.SimpleRabbitListenerContainer
 import org.springframework.amqp.rabbit.connection.ConnectionFactory;
 
 @Configuration
+@EnableRabbit
+@org.springframework.context.annotation.Profile("legacy-experiment")
 public class QueueConfig {
     // New names avoid silently changing existing QA/QD arguments on an installed broker.
     public static final String EXCHANGE = "event-trading.orders.v1";

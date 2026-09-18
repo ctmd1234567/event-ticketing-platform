@@ -25,7 +25,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
 @Testcontainers
-@ActiveProfiles("local")
+@ActiveProfiles({"local", "legacy-experiment"})
 @SpringBootTest(properties = {
         "app.event-orders.expiry-scan-enabled=false",
         "app.payment-recovery.enabled=false"

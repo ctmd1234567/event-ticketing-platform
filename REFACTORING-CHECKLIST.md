@@ -87,13 +87,22 @@
 
 推荐执行模型：GPT-5.6 Sol High；仅复杂边界难以判断时使用 GPT-6 审查。
 
-- [ ] 设置显式工程实验 profile 或等价开关，默认应用仅启用 Event 产品。
-- [ ] 一起隔离旧 Controller、事务组件、Publisher、Listener、QueueConfig 和 Metrics；不能只设置 app.outbox.enabled=false。
-- [ ] 核查 Rabbit 自动配置、健康检查和 Bean 注入，避免默认启动仍依赖旧 Broker。
-- [ ] 保留关单和支付恢复调度；不得关闭全局 Scheduling 来停旧 Outbox。
-- [ ] 明确现有 k6 的复现路径：暂留实验专用最小 HTTP 适配层，或采用固定历史版本在隔离环境复现。删除原入口前验证所选路径。
-- [ ] 旧实验只维护必要可运行性，不新增 Voucher 业务，不作为正式产品接口。
-- [ ] 同步整理 application.yaml、compose.yaml、pom.xml，保留必要依赖，不操作现存数据或队列。
+- [x] 设置显式工程实验 profile 或等价开关，默认应用仅启用 Event 产品。
+- [x] 一起隔离旧 Controller、事务组件、Publisher、Listener、QueueConfig 和 Metrics；不能只设置 app.outbox.enabled=false。
+- [x] 核查 Rabbit 自动配置、健康检查和 Bean 注入，避免默认启动仍依赖旧 Broker。
+- [x] 保留关单和支付恢复调度；不得关闭全局 Scheduling 来停旧 Outbox。
+- [x] 明确现有 k6 的复现路径：暂留实验专用最小 HTTP 适配层，或采用固定历史版本在隔离环境复现。删除原入口前验证所选路径。
+- [x] 旧实验只维护必要可运行性，不新增 Voucher 业务，不作为正式产品接口。
+- [x] 同步整理 application.yaml、compose.yaml、pom.xml，保留必要依赖，不操作现存数据或队列。
+
+
+阶段 C 完成记录（2026-09-18）：
+
+- 新增显式 `legacy-experiment` profile；旧 Voucher 下单 Controller/Service、事务与并发保护、Outbox 发布/指标、Rabbit 拓扑和 Listener 仅在该 profile 下创建。
+- 默认 `app.outbox.enabled=false`、Rabbit 健康检查关闭；默认 Compose 仅解析出 MySQL/Redis，实验 profile 才加入 RabbitMQ。AMQP 依赖因实验测试仍需编译运行而保留。
+- 全局 Scheduling 未关闭，Event 关单与支付恢复的独立默认开关未改；生命周期测试不再传旧 Rabbit/Outbox 关闭参数。
+- 现有 `loadtest/order-capacity.js` 及隔离种子保留为实验 profile 专用复现路径；本阶段未运行 k6，也未将历史性能结果改称 Event 结果。
+- IDEA MCP / Java 21.0.7 验证默认 Event 基础设施 3 项、实验消息链路 1 项、Event 生命周期 2 项，以及旧事务/Outbox/配置绑定 12 项，未见失败；详见 `docs/verification/REFACTORING-STAGE-C-LEGACY-EXPERIMENT.md`。
 
 完成条件：默认无旧业务处理器、消费者、Outbox 扫描和旧业务指标；Event 在无旧 Broker 的隔离环境中正常启动；工程资产仍有有效验证入口。
 

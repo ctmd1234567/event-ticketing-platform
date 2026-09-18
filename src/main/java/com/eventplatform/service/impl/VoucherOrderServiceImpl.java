@@ -10,6 +10,7 @@ import com.eventplatform.utils.UserHolder;
 import org.springframework.stereotype.Service;
 
 @Service
+@org.springframework.context.annotation.Profile("legacy-experiment")
 public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, VoucherOrder> implements IVoucherOrderService {
     private final OrderTransactions orders;
     public VoucherOrderServiceImpl(OrderTransactions orders) { this.orders = orders; }

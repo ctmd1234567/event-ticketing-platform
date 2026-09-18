@@ -14,6 +14,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
 @Component
+@org.springframework.context.annotation.Profile("legacy-experiment")
 public class OrderPerformance {
     private final Semaphore inFlight;
     private final long waitMillis;

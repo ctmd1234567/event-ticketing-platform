@@ -7,6 +7,7 @@ import org.springframework.stereotype.Component;
 import java.util.List;
 
 @Component
+@org.springframework.context.annotation.Profile("legacy-experiment")
 public class SeckillVoucherListener {
     private final OrderTransactions orders;
     public SeckillVoucherListener(OrderTransactions orders) { this.orders = orders; }

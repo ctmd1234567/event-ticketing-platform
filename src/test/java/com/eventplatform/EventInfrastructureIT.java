@@ -35,10 +35,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 @Testcontainers
 @ActiveProfiles("local")
 @SpringBootTest(properties = {
-        "app.outbox.enabled=false",
         "app.event-orders.expiry-scan-enabled=false",
         "app.payment-recovery.enabled=false",
-        "spring.rabbitmq.listener.simple.auto-startup=false"
+        "spring.rabbitmq.port=1"
 })
 class EventInfrastructureIT {
     @Container
@@ -70,6 +69,9 @@ class EventInfrastructureIT {
     @Autowired
     Flyway flyway;
 
+    @Autowired
+    org.springframework.context.ApplicationContext context;
+
     @DirtiesContext(methodMode = DirtiesContext.MethodMode.AFTER_METHOD)
     @Test
     void realFlywayMySqlAndEventOrderRoundTrip() {
@@ -93,6 +95,19 @@ class EventInfrastructureIT {
                 .containsEntry("available", 1)
                 .containsEntry("reserved", 1)
                 .containsEntry("allocated", 0);
+    }
+
+    @Test
+    void defaultProductContextDoesNotCreateLegacyOrderProcessingBeans() {
+        assertThat(context.getBeansOfType(com.eventplatform.controller.VoucherOrderController.class)).isEmpty();
+        assertThat(context.getBeansOfType(com.eventplatform.service.impl.VoucherOrderServiceImpl.class)).isEmpty();
+        assertThat(context.getBeansOfType(com.eventplatform.order.OrderTransactions.class)).isEmpty();
+        assertThat(context.getBeansOfType(com.eventplatform.order.OrderPerformance.class)).isEmpty();
+        assertThat(context.getBeansOfType(com.eventplatform.order.OutboxPublisher.class)).isEmpty();
+        assertThat(context.getBeansOfType(com.eventplatform.order.OutboxMetrics.class)).isEmpty();
+        assertThat(context.getBeansOfType(com.eventplatform.config.QueueConfig.class)).isEmpty();
+        assertThat(context.getBeansOfType(com.eventplatform.listener.SeckillVoucherListener.class)).isEmpty();
+        assertThat(context.getBeansOfType(EventOrderService.class)).hasSize(1);
     }
 
     @DirtiesContext(methodMode = DirtiesContext.MethodMode.AFTER_METHOD)

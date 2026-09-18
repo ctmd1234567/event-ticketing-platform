@@ -17,6 +17,7 @@ import java.time.Duration;
 import java.time.Instant;
 
 @Service
+@org.springframework.context.annotation.Profile("legacy-experiment")
 public class OrderTransactions {
     private final JdbcTemplate db;
     private final TransactionTemplate transactions;

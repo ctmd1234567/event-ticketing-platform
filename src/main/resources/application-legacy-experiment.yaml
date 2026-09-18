@@ -1,0 +1,32 @@
+spring:
+  config:
+    activate:
+      on-profile: legacy-experiment
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USER:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    template:
+      mandatory: true
+    listener:
+      simple:
+        acknowledge-mode: auto
+        default-requeue-rejected: false
+        concurrency: ${RABBIT_CONSUMERS:4}
+        max-concurrency: ${RABBIT_MAX_CONSUMERS:16}
+        prefetch: ${RABBIT_PREFETCH:50}
+        retry:
+          enabled: true
+          initial-interval: 1s
+          max-attempts: 3
+          multiplier: 2
+management:
+  health:
+    rabbit:
+      enabled: true
+app:
+  outbox:
+    enabled: ${OUTBOX_ENABLED:true}
