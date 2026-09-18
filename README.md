@@ -1,232 +1,196 @@
-# 高并发活动交易平台 / Event Trading Platform
+<div align="center">
 
-[简体中文](README.md) | [English](README.en.md)
+# Event Trading Platform
 
-基于 Java 21、Spring Boot、MySQL、Redis 和 RabbitMQ 的模块化单体交易后端。V1 活动链路同步创建订单并预占票档库存；仓库同时保留原有优惠券抢购与 Outbox/RabbitMQ 链路作为兼容能力。
+### 把高并发交易里最难讲清的部分，做成可运行、可验证的 Java 后端
 
-## 当前实现范围
+**同步下单 · 库存守恒 · 幂等重试 · 支付 UNKNOWN 恢复 · 关单竞争 · 晚到支付补偿**
 
-当前已实现活动、场次、票档的创建/发布/查询、同步订单与库存预占、未支付订单取消、数据库超时关单、幂等库存释放和重启补扫。V1 支付边界包含 V6 持久化结构、独立事务的模拟网关、`UNKNOWN` 查询/回调恢复、支付与关单竞争、唯一晚到支付补偿退款，以及本人查询/刷新和 ADMIN 人工恢复接口。2026-09-17 通过 IDEA / Microsoft OpenJDK 21.0.7 验证 H2 支付契约 26 项、MySQL 8.4 支付边界 26 项及 HTTP/安全 7 项，均无失败或跳过。范围、证据与限制见 [0～6 验收记录](docs/verification/CHECKLIST-0-6.md)。
+[![Java 21](https://img.shields.io/badge/Java-21-E76F00?logo=openjdk&logoColor=white)](https://openjdk.org/projects/jdk/21/)
+[![Spring Boot 3.5](https://img.shields.io/badge/Spring%20Boot-3.5.16-6DB33F?logo=springboot&logoColor=white)](https://spring.io/projects/spring-boot)
+[![MySQL 8.4](https://img.shields.io/badge/MySQL-8.4-4479A1?logo=mysql&logoColor=white)](https://www.mysql.com/)
+[![Tests](https://img.shields.io/badge/latest%20verification-97%20tests%20passed-2EA44F)](#验证证据)
+[![1500 RPS](https://img.shields.io/badge/concurrency%20experiment-1500%20target%20RPS-7B61FF)](docs/verification/CONCURRENCY-EXPERIMENT-1500-RPS-2026-09-18.md)
+[![GitHub stars](https://img.shields.io/github/stars/ctmd1234567/event-trading-platform?style=social)](https://github.com/ctmd1234567/event-trading-platform)
 
-## 项目亮点
+[English](README.en.md) · [领域模型](docs/architecture/DOMAIN-MODEL.md) · [状态机](docs/architecture/STATE-MACHINES.md) · [API 合同](docs/architecture/API-CONTRACT.md) · [验收记录](docs/verification/CHECKLIST-0-6.md)
 
-- **MySQL 交易事实源**：16 个库存桶分散单商品写热点，条件扣减与唯一约束防止超卖和重复下单；Redis 不保存最终交易状态。
-- **V1 活动交易基线**：活动包含多个场次和票档；一单一票，价格从服务端票档快照，订单与 `RESERVED` 预占在同一 MySQL 事务提交。
-- **可恢复支付边界**：模拟网关结果独立提交；响应丢失保留 `UNKNOWN` 并按原支付号查询恢复，关单后晚到扣款只创建一个同号重试的补偿退款且不再改库存。
-- **短事务与过载保护**：幂等查询位于事务外，公平信号量限制数据库在途事务，并在过载时快速返回 `429`。
-- **事务内记录发送意图**：库存扣减、请求记录和 Outbox 事件在同一事务中提交，最终订单由消费者创建。
-- **异步消息处理**：实现 Outbox 租约批量发布、Confirm/Return 检查、持久化消息、消费端批量事务、失败队列和定时重发；这些机制不等于所有故障场景已验证。
-- **请求幂等**：同一用户重复提交同一抢购请求时返回同一个请求 ID，不重复扣减库存。
-- **分层流量控制**：一次基于 Redis `TIME` 的 Lua 令牌桶调用完成用户、单商品和全局三级准入检查。
-- **可观测性**：独立管理端口暴露 Prometheus 指标，包括连接池、预留耗时、异步完成延迟、入口拒绝和 Outbox 积压。
-- **安全边界**：Token 鉴权、管理员权限、验证码原子消费、接口限流和请求结束身份清理。
-- **自动化验证**：已验收的 0～5 基线通过 38 项默认测试；其隔离测试覆盖 Flyway V1～V5、真实 MySQL、Redis、RabbitMQ、1000 请求库存竞争及订单生命周期。第 6 项另由 IDEA 验证 26 项 H2 支付契约、26 项 MySQL 8.4 支付边界及 7 项 HTTP/安全测试；本次未重跑完整默认套件。
+</div>
 
-## 技术栈
+---
 
-- Java 21、Spring Boot 3.5
-- Spring Security、MyBatis-Plus
-- MySQL 8、Redis、RabbitMQ
-- Maven、Docker Compose
-- JUnit 5、H2、Mockito、Testcontainers、k6
+## 为什么这个项目值得看
 
-## 兼容优惠券抢购链路
+这不是把技术名词堆在 README 里的票务 CRUD。项目围绕真实交易失败边界设计，并为关键结论提供确定性测试：
+
+- **库存是事务事实，不是缓存猜测**：下单在一个 MySQL 本地事务中创建订单、预占明细并更新 `available / reserved / allocated`，始终满足库存守恒。
+- **网络超时不等于支付失败**：请求超时进入 `UNKNOWN / PROCESSING`，复用同一业务号通过回调、主动查询与重启恢复收敛，避免重复扣款。
+- **竞争结果由提交顺序决定**：支付先赢则完成分配；关单先赢则释放库存，之后确认的扣款生成唯一全额补偿退款，订单不会被错误“复活”。
+- **测试主动制造坏路径**：真实 MySQL 行锁、并发屏障、响应丢失注入、重复回调与重启恢复用于证明边界，而不是用 `sleep` 猜竞态。
+
+## 一眼看懂架构
 
 ```mermaid
-flowchart TD
-  A[用户提交抢购请求] --> B[Redis Lua 三级流量准入]
-  B --> C{已有请求或订单}
-  C -- 是 --> D[返回原请求 ID]
-  C -- 否 --> E[条件扣减一个 MySQL 库存桶]
-  E --> F[事务写入 PENDING 请求与 Outbox]
-  F --> G[提交事务并返回请求 ID]
+flowchart LR
+    Client[Client / Postman] --> Security[Identity & Security]
+    Security --> Catalog[Event Catalog]
+    Security --> Order[Order & Inventory]
+    Order -->|one local transaction| MySQL[(MySQL 8.4)]
+    Catalog --> MySQL
+    Order --> Payment[Payment Orchestration]
+    Payment --> Gateway[Simulated Gateway Boundary]
+    Payment --> MySQL
+    MySQL --> Recovery[Expiry & Payment Recovery]
+    Security <--> Redis[(Redis 7.4)]
 
-  H[Outbox 批量扫描并租约事件] --> I[整批发布持久消息]
-  I --> J[等待 Broker Confirm]
-  J -- 失败或退回 --> K[记录错误并延迟重试]
-  K --> H
-  J -- 已确认 --> L[RabbitMQ 批量消费者]
-  L --> M[整批锁定请求并批量创建订单]
-  M --> N[批量标记请求与 Outbox 完成]
-  N --> O[事务提交后 ACK]
-  L -- 重试耗尽 --> P[失败队列]
+    subgraph Isolated concurrency experiment
+      Experiment[High-throughput order path] --> Rabbit[(RabbitMQ 4.1)]
+      Experiment --> MySQL
+    end
 ```
 
-Publisher 同时检查 Confirm ACK 和 Return；Confirm 不证明消费者已完成业务，也不能单独证明路由到了预期队列。消费者本地事务将请求、最终订单与 Outbox 完成标记一起提交；Spring 监听容器随后确认消费。重复投递通过业务唯一约束和请求状态保护处理。
+默认产品运行时只启用 Identity/Security、Event Catalog、同步 Order/Inventory、Payment/Compensation 和恢复任务。RabbitMQ 仅用于隔离的高并发订单工程实验，不参与 Event 核心订单创建。
 
-当前 Outbox 的 `completed` 表示消费业务已完成，而非仅发布成功。Broker 确认后事件仍可在租约到期后重发，直到消费者提交；消费者失败队列不会自动终止数据库 Publisher 的定时重发。因此这里不宣称端到端有限重试或完整 DLQ 重驱闭环。
+## 核心业务闭环
 
-## 已实现功能
+```text
+DRAFT Event
+   └─ publish ─> ON SALE
+                    └─ create order ─> PENDING_PAYMENT + RESERVED
+                                           ├─ payment wins ─> PAID + CONFIRMED + allocated
+                                           └─ cancel/expire ─> CLOSED + RELEASED + available
+                                                                    └─ late charge
+                                                                        └─ one compensation refund
+```
 
-### 账户与安全
+固定的 V1 规则：一单一票、CNY 整数分、同用户同票档限购一单、同幂等键同载荷返回原结果、成交后退款不回售。
 
-- 手机验证码登录和 Token 鉴权。
-- Token 滑动过期及主动登出。
-- 管理接口角色校验。
-- 验证码发送、校验和来源 IP 限流。
-- 图片类型、大小、像素及所有者校验。
+## 已实现能力
 
-### 交易与一致性
+### Event 与同步交易
 
-- 活动、场次、票档的最小创建、发布、停售和公开查询。
-- 同步活动订单创建、服务端 CNY 分价快照和独立预占记录。
-- 同一用户和幂等键重放原订单；同用户同票档限购一单。
-- 订单详情和列表按认证用户过滤，其他用户查询返回不存在。
-- 独立持久化模拟支付、签名回调、`UNKNOWN`/启动补扫及同业务号幂等恢复。
-- 支付先赢时一次性确认预占；关单先赢时创建唯一全额补偿退款，退款不修改库存。
-- 本人支付/补偿退款查询与刷新，以及带审计和幂等键的 ADMIN 人工重试。
-- 优惠券及限时抢购。
-- 数据库条件扣减库存。
-- 单商品 16 个 MySQL 库存桶分散行锁竞争。
-- 用户、单商品和全局三级流量准入。
-- 公平在途事务限制和快速过载拒绝。
-- 同一用户、同一优惠券的请求幂等。
-- 订单请求状态查询：`PENDING`、`COMPLETED`。
-- Transactional Outbox 批量发布和定时补发。
-- RabbitMQ 持久化、Confirm、Return、并发消费、重试和失败队列。
-- Prometheus 订单、连接池和 Outbox 指标。
+- 活动、场次、票档创建、发布、停售与公开查询
+- 服务端价格快照、销售窗口校验和用户所有权隔离
+- 同步订单创建、独立库存预占记录、幂等键与购买限制
+- 1000 个并发请求竞争 100 张票：100 成功、900 明确业务冲突、0 技术失败
 
-### 现存兼容功能
+### 生命周期与恢复
 
-仓库仍包含下列商户与社交接口，属于现存兼容范围，不代表活动交易领域已经完整实现：
+- 用户取消与超时关单共享同一事务边界
+- 固定锁顺序：`order → reservation → ticket tier`
+- 持久化过期扫描、失败退避与应用重启补扫
+- 取消/过期、下单/释放并发下仍保持库存守恒
 
-- 商户查询缓存、空值缓存和逻辑过期。
-- 商户分类查询。
-- 笔记、点赞、关注和签到。
-- 图片上传、读取和删除。
+### 支付与补偿
 
-## 快速启动
+- 模拟网关使用独立提交边界，不与本地订单事务混在一起
+- 支付创建、查询、刷新、签名回调和持久化恢复
+- `UNKNOWN / PROCESSING / MANUAL_REQUIRED` 可查询，不把不确定状态伪装成成功或失败
+- 关单后晚到支付创建唯一全额补偿退款；补偿不二次修改库存
+- ADMIN 人工接管使用同业务号、幂等键、原因和审计记录
 
-### 环境要求
+## 验证证据
+
+2026-09-18 使用 IntelliJ IDEA 2026.1.3 和 Microsoft OpenJDK 21.0.7 验证当前清理候选：
+
+- **65 个默认测试**：身份、安全、Event、库存事务、支付服务、控制器和模拟网关
+- **31 个 Event 集成测试**：`EventInfrastructureIT` 3、`EventOrderLifecycleIT` 2、`PaymentBoundaryIT` 26
+- **1 个隔离实验测试**：`LegacyMessagingIT` 在 Testcontainers MySQL/Redis/RabbitMQ 上验证保留链路
+- IDEA 全量重建成功，0 个编译问题；上述 97 个测试方法均为 0 失败、0 忽略
+
+完整证据与限制见 [0～6 验收记录](docs/verification/CHECKLIST-0-6.md) 和 [清理验收记录](docs/verification/REFACTORING-STAGE-D-E-ACCEPTANCE.md)。Flyway 11.7.2 对 MySQL 8.4 仍有版本认证提示；迁移与断言实际通过，这不是生产兼容性认证。
+
+## 快速开始
+
+### 1. 环境
 
 - Java 21
-- Maven 3.6.3+
-- Docker Desktop
+- Maven 3.9+
+- Docker Desktop / Docker Engine
 
-### 1. 配置环境变量
-
-在项目根目录创建 `.env`：
+在项目根目录创建未跟踪的 `.env`：
 
 ```properties
 MYSQL_URL=jdbc:mysql://127.0.0.1:3307/event_trading?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
 MYSQL_USER=root
-MYSQL_PASSWORD=替换为本地密码
-
+MYSQL_PASSWORD=replace-with-a-local-password
 REDIS_HOST=127.0.0.1
 REDIS_PORT=6380
-
-RABBITMQ_HOST=127.0.0.1
-RABBITMQ_PORT=5673
-RABBITMQ_USER=event_app
-RABBITMQ_PASSWORD=替换为本地密码
+ADMIN_USER_IDS=1
 ```
 
-`.env` 已被 Git 忽略，请勿提交真实凭据。
+### 2. 启动与验证
 
-### 2. 启动基础设施
-
-```powershell
+```bash
 docker compose up -d
 docker compose ps
-```
-
-默认端口：MySQL `3307`、Redis `6380`、RabbitMQ `5673`、RabbitMQ 管理界面 `15673`。
-
-当前源码包含 Flyway `V1` 至 `V6`；其中 V6 新增本地支付/退款、回调/历史记录和独立模拟网关结果表。2026-09-17 的 `PaymentBoundaryIT` 已验证六个迁移在 MySQL 8.4 空库成功执行。已有本地库仅在确认已经包含历史基础表和订单/Outbox 升级后，才按版本 `2` 建立 baseline 并继续执行后续迁移；Flyway clean 已禁用。测试种子只位于 `src/test/resources`，不会写入开发数据库。
-
-### 3. 启动应用
-
-```powershell
 mvn test
-mvn '-Dspring-boot.run.profiles=local' spring-boot:run
+mvn -Dspring-boot.run.profiles=local spring-boot:run
 ```
 
-服务地址：`http://127.0.0.1:8081`。`local` profile 会返回开发验证码，只能用于本机调试。
+默认 Compose 只启动 MySQL 与 Redis。应用地址为 `http://127.0.0.1:8081`，管理端点仅监听 `127.0.0.1:8082`。`local` profile 会返回本地验证码，禁止暴露到公网。
 
-## 测试
+真实依赖集成测试使用隔离 Testcontainers，不写个人开发库：
 
-默认测试不连接个人数据库：
-
-```powershell
-mvn test
-```
-
-2026-09-15 使用 IDEA 项目配置的 Microsoft OpenJDK 21.0.7 和 Maven 3.9.16 重新执行：**38 项通过，0 失败、0 错误、0 跳过**。
-
-使用真实 MySQL、Redis 和 RabbitMQ 运行隔离集成测试：
-
-```powershell
+```bash
 mvn -Pinfrastructure verify
 ```
 
-同日通过 IDEA 直接运行 `InfrastructureIT`：**2 项通过，0 失败**。测试确认 Flyway `V1` 至 `V5` 在 MySQL 8.4 空库顺序执行，并覆盖真实 MySQL 活动下单、Redis、RabbitMQ，以及 1000 个有效请求竞争 100 张库存的验收：100 个预占成功、900 个业务拒绝、0 个技术失败，库存和预占明细守恒。另有 `EventOrderLifecycleIT` **2 项通过，0 失败**，覆盖 30 秒 TTL、1 秒扫描、取消与过期竞争、同票档下单与关单竞争、库存释放及重启补扫；应用就绪后约 43 ms 完成 4 个过期订单的恢复处理。默认单测另行验证失败订单的持久化退避不会饿死后续候选。Flyway 11.7.2 会提示其数据库识别表尚未认证 MySQL 8.4；迁移与断言实际通过，但该兼容提示保留为已知限制。IDEA 直接运行不会生成 Maven Failsafe 报告，上述结果以对应测试类的退出码 0 和完整控制台输出为证据。
+### 3. 高并发工程证据
 
-2026-09-17 通过 IDEA / Microsoft OpenJDK 21.0.7 聚焦验收第 6 项：`EventPaymentServiceTest` **26 项通过**，真实 MySQL 8.4 的 `PaymentBoundaryIT` **26 项通过**，支付控制器、回调、ADMIN 恢复与安全回归合计 **7 项通过**；均为 0 失败、0 跳过。竞争顺序由有界屏障、真实行锁钩子和故障注入确定，不使用 `sleep` 证明竞态。覆盖正常支付、响应丢失后恢复、支付先赢、关单先赢后的唯一补偿退款、重复回调/重试、人工接管、关单后不得新发扣款，以及晚到支付不再次修改库存。本次没有重跑 38 项完整默认套件，也没有进行第 7 项联合演示或支付压测。详细证据见 [0～6 验收记录](docs/verification/CHECKLIST-0-6.md)。
+独立的异步订单实验用于保存分桶库存、准入保护、Outbox 与批量消费成果，不属于默认产品启动步骤。最新 1500 RPS 实测、原始 k6 摘要与数据库终态见 [并发实验复测记录](docs/verification/CONCURRENCY-EXPERIMENT-1500-RPS-2026-09-18.md)。
 
-## 并发压测
+## API 导航
 
-`loadtest/` 包含真实下单固定到达率脚本、隔离优惠券数据和自动过期的合成用户令牌。准备隔离数据后可执行：
+- 公开目录：`GET /api/v1/events`、`GET /api/v1/events/{id}`
+- ADMIN 建档：`POST /api/v1/admin/events`、场次、票档、发布与停售命令
+- 用户订单：`POST /api/v1/orders`、查询、列表、取消
+- 支付恢复：创建支付、查询/刷新支付与补偿退款
+- 可信回调：`POST /api/v1/payment-callbacks/simulated`
+- ADMIN 接管：查询恢复工作、同号重试支付/退款
 
-```powershell
-$env:RATE='1500'
-$env:DURATION_SECONDS='10'
-$env:VOUCHER_ID='9900021600'
-$env:BASE_URL='http://127.0.0.1:8081'
-k6 run .\loadtest\order-capacity.js
-```
-
-容量测试启动应用时将单商品/全局限流上限临时提高到 `5000`，避免保护阈值掩盖系统边界；日常默认值仍为单商品 `420/s`、全局 `800/s`。本地单实例测试环境：Windows 11、Java 21、Docker MySQL 8.4、Redis 7.4、RabbitMQ 4.1、k6 v2.2.0。每次请求调用真实鉴权下单接口并使用不同合成用户；RabbitMQ 消费与入口并行运行，测试后核对库存、请求、最终订单、重复订单和 Outbox。
-
-已有记录中的 10 秒固定到达率结果（本次文档更新未重新压测）：
-
-以下 P95 为下单 HTTP 请求耗时，不是异步成单或支付完成延迟；请求返回受理结果后，另行核对最终订单和 Outbox。各档位结果只适用于所述实验条件。
-
-- 1000 目标 RPS：P95 34.69 ms，10001 个请求和最终订单，0 拒绝、0 异常、0 dropped iterations、重复订单 0、Outbox 0。
-- 1200 目标 RPS：P95 12.77 ms，12001 个请求和最终订单，0 拒绝、0 异常、0 dropped iterations、重复订单 0、Outbox 0。
-- 1400 目标 RPS：P95 17.1 ms，14001 个请求和最终订单，0 拒绝、0 异常、0 dropped iterations、重复订单 0、Outbox 0。
-- 1500 目标 RPS：P95 14.82 ms，15001 个请求和最终订单，0 拒绝、0 异常、0 dropped iterations、重复订单 0、Outbox 0。
-- 1600 目标 RPS：P95 109.13 ms，16001 次请求中 15848 次受理、153 次受控 `429`，0 非预期响应、0 dropped iterations；受理请求最终全部成单，重复订单 0、Outbox 0。
-
-按 P95 小于 1 秒、无 `429`、无非预期响应、无 dropped iteration、无超卖/重复单且 Outbox 完全排空的严格口径，已有实验中最高通过档位为 1500 目标 RPS；1600 档位出现受控拒绝，未通过该口径。该结果是本地单实例、10 秒短时容量基线，不代表精确最大容量、生产 SLA、支付退款吞吐或长时间稳定性结论。
+请求和状态语义以 [API 合同](docs/architecture/API-CONTRACT.md) 为准。
 
 ## 项目结构
 
 ```text
-event-trading-platform/
-├─ src/main/java/com/eventplatform/
-│  ├─ config/          # 安全、数据库和消息配置
-│  ├─ controller/      # HTTP API
-│  ├─ order/           # 订单事务与 Outbox
-│  ├─ security/        # Token、验证码和限流
-│  ├─ service/         # 业务逻辑
-│  └─ upload/          # 图片存储
-├─ src/main/resources/
-│  ├─ db/              # 建库及升级脚本
-│  └─ mapper/          # MyBatis XML
-├─ src/test/           # 单元、回归和集成测试
-├─ docs/               # 架构与技术说明
-├─ loadtest/           # k6 写链路压测与隔离数据
-├─ postman/            # API 请求集合
-├─ compose.yaml
-└─ pom.xml
+src/main/java/com/eventplatform/
+├── catalog/       Event、Session、TicketTier
+├── controller/    Event、Order、Payment、Identity API
+├── order/         同步订单、库存、关单；隔离的历史工程实验
+├── payment/       网关边界、回调、UNKNOWN 恢复、补偿退款
+├── security/      Token、验证码、权限与限流
+├── service/       最小身份服务
+└── config/        Security、MyBatis、实验 Rabbit 配置
+
+src/main/resources/db/migration/   Flyway V1～V6（不可回写）
+src/test/                         单元、并发与 Testcontainers 验收
+docs/                             架构、状态机、API 与验证证据
+loadtest/                         历史工程实验；不代表 Event 性能
 ```
 
-## 运行边界
+## 当前边界与路线图
 
-- MySQL 是库存和订单的最终事实源；Redis 用于缓存、会话和流量准入。
-- 同一商品库存分散到 16 个 MySQL 行桶，查询库存时汇总各桶；现有数据库使用 `db/performance-upgrade.sql` 迁移。
-- 旧抢购接口返回请求 ID，最终优惠券订单由 RabbitMQ 消费者异步创建；`/api/v1/orders` 活动订单则在本地事务中同步创建。
-- 模拟网关与本地支付状态使用独立事务但共用同一物理 MySQL；它验证持久化边界，不代表真实资金渠道或独立数据库故障域。V1 不提供用户主动退款，也未新增支付/退款 MQ 事件。
-- 管理端口 `127.0.0.1:8082` 仅暴露健康检查与 Prometheus 指标。
-- 本地 Compose 用于开发和验证，不代表生产部署环境。
+- 当前完成：V1 清单 0～6，以及旧业务清理和默认运行时收敛
+- 下一步：第 7 项 Event 联合 Demo、请求集合和真实写链路基线
+- V2：Event Notification Outbox/MQ、DLQ/redrive、用户全额退款、针对性对账和故障证据
+- V3：按需要选择 Soak、告警、备份恢复等增强；不是项目完成门槛
 
-## 相关文档
+未实现：用户主动退款、Event 通知/SSE、Event Outbox/DLQ、通用对账框架和第 7 项性能基线。
 
-以下架构文档包含目标设计，阅读时应与上面的当前实现范围区分。
+<details>
+<summary><strong>1500 RPS 高并发订单工程实验</strong></summary>
 
-- [安全及一致性说明](docs/SECURITY-FIXES.md)
-- [领域模型设计](docs/architecture/DOMAIN-MODEL.md)
-- [业务状态机设计](docs/architecture/STATE-MACHINES.md)
-- [API 契约设计](docs/architecture/API-CONTRACT.md)
+2026-09-18 在当前清理候选上完成本地单实例、10 秒恒定到达率复测：预热后 15,001 个请求全部接受并最终成单，HTTP P95 106.51 ms，0 个 429、HTTP 失败、异常响应、丢弃迭代和重复用户订单；Outbox 与 Rabbit 队列最终均为 0。首次冷启动轮未通过严格门槛，因此同时保留，不从证据中删除。该结果验证分桶库存、准入保护、Outbox 与批量消费链路，不代表 Event 支付吞吐、生产 SLA 或长期稳定性。详见 [原始证据与完整边界](docs/verification/CONCURRENCY-EXPERIMENT-1500-RPS-2026-09-18.md)。
+
+</details>
+
+## 设计文档
+
+- [领域模型与事务边界](docs/architecture/DOMAIN-MODEL.md)
+- [订单、支付与退款状态机](docs/architecture/STATE-MACHINES.md)
+- [API 合同](docs/architecture/API-CONTRACT.md)
 - [支付边界设计](docs/architecture/PAYMENT-BOUNDARY-DESIGN.md)
-- [0～6 验收记录](docs/verification/CHECKLIST-0-6.md)
+- [工程资产登记](docs/verification/REFACTORING-STAGE-A-ASSET-REGISTER.md)
+
+如果这个项目里的失败边界、测试方法或取舍对你有帮助，欢迎点一个 ⭐，也欢迎带着具体场景提 Issue。

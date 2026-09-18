@@ -1,5 +1,0 @@
-$kind: http-request
-description: ""
-url: "{{base_url}}/shop-type/list"
-method: GET
-order: 4132749025591275

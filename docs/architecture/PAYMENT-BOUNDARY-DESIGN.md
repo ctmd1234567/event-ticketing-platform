@@ -4,12 +4,13 @@ Date: 2026-09-16
 
 Baseline reviewed: `5bbf8c8` (checklist 0–5).
 
-Status: checklist item 6 is implemented in the current review candidate. On
-2026-09-17, IDEA runs with Microsoft OpenJDK 21.0.7 passed 26 H2 payment tests,
-26 MySQL 8.4 payment-boundary tests, and 7 controller/security test methods,
-with no failures or skips. The complete evidence and explicit limitations are in
-[the 0-6 verification record](../verification/CHECKLIST-0-6.md). The candidate
-remains uncommitted pending user review.
+Status: checklist item 6 was committed as `ee75182`. On 2026-09-18, the
+post-refactoring candidate based on `7b97c0f` was rebuilt and reverified with
+Microsoft OpenJDK 21.0.7: all 26 H2 payment tests, all 26 MySQL 8.4
+payment-boundary tests, and the retained controller/security coverage passed.
+The complete evidence and explicit limitations are in [the 0-6 verification
+record](../verification/CHECKLIST-0-6.md) and [the D/E cleanup acceptance
+record](../verification/REFACTORING-STAGE-D-E-ACCEPTANCE.md).
 
 ## Scope and invariants
 
@@ -239,7 +240,8 @@ fault switches, refund-create endpoint, or global response-envelope rewrite.
 1. 6.2: `V6__event_payments.sql` implements the storage contract. The existing
    real-MySQL infrastructure test now expects V1 through V6. On 2026-09-17,
    `PaymentBoundaryIT` verified all six migrations on a clean MySQL 8.4
-   database; `InfrastructureIT` itself was not rerun in this verification.
+   database. The later cleanup acceptance reran the split
+   `EventInfrastructureIT` (3 tests) against Flyway `V1` through `V6`.
 2. 6.3: `JdbcSimulatedPaymentGateway` provides the simulated-gateway
    interface/implementation and post-commit response-loss wrapper. Its focused
    tests verify that payment and refund results survive a lost response and
@@ -269,5 +271,6 @@ fault switches, refund-create endpoint, or global response-envelope rewrite.
    now record only the observed evidence and current boundaries.
 
 The implementation deliberately stops at item 6. It adds no user-created refunds,
-notifications, MQ events, general reconciliation framework, benchmark, or item-7
-demo/delivery work. Commit and push still require explicit user approval.
+notifications, Event MQ events, general reconciliation framework, benchmark, or
+item-7 demo/delivery work. Item 6 is committed at `ee75182`; the current D/E/F
+cleanup candidate remains uncommitted, and item 7 has not started.

@@ -1,41 +1,47 @@
-# Security and Consistency Changes
+# Security and Consistency Record
 
-Baseline: the original repository at commit `cd293f3`, migrated locally to Java 21 and Spring Boot 3.5.16.
-MyBatis-Plus 3.5.17, Hutool 5.8.47, and the existing Postman workspace definitions were retained.
+Updated: 2026-09-18
 
-## Review Findings and Changes
+Historical baseline: `cd293f3`. Current payment baseline: `ee75182`. Cleanup profiles and test boundaries are committed through `7b97c0f`; the current D/E candidate removes the remaining shop/social/upload surface.
 
-1. Thread-local identity leakage: `TokenFilter` initializes and clears request identity in a `finally` block, so an invalid token cannot inherit the previous request's user.
-2. Anonymous write endpoints: Spring Security distinguishes public reads from administrative operations by method and path; administrator IDs come from server-side configuration.
-3. Path traversal: the server generates file names and validates ownership, normalized paths, symbolic links, and image contents; deletion via `GET` is prohibited.
-4. Cache correctness: cold reads fall back to the database, lock ownership is verified, logical expiration is bounded, and invalidation happens after commit.
-5. Partial order commits: a database transaction reserves stock and persists the request plus Outbox event; the consumer transaction creates the order; a database uniqueness constraint enforces business idempotency.
-6. Redis/message-broker dual writes: Redis is no longer the authoritative inventory source. A durable Outbox, broker confirms, retries, idempotent consumption, and owner-scoped status queries provide recoverability.
-7. Flash-sale timing: the conditional stock update validates start time, end time, and voucher status in the database.
-8. Legacy stream, verification code, and logout behavior: the unused stream path was removed; verification-code delivery is configurable, rate-limited, and single-use; logout revokes the token.
+## Current controls
 
-Platform administrators can operate all shops. This is not a tenant-isolated merchant platform.
-Redis caching and sessions plus RabbitMQ remain runtime dependencies; the project does not claim every production protection by default.
-Payments, refunds, and an operations console are not implemented.
+- `TokenFilter` accepts explicit bearer tokens, loads the server-side Redis session, and always clears thread-local identity in `finally`.
+- Only verification-code/login, the exact simulated callback POST, health/Prometheus, and public Event catalog reads are anonymous.
+- `/api/v1/admin/**` requires an ADMIN identity configured by server-side user IDs.
+- Orders, payments, and refunds derive the actor from the authenticated context; another user's resource is hidden.
+- Verification codes are configurable, rate-limited, single-use, and never pretend to send when SMS delivery is disabled.
+- Logout revokes the Redis token and clears the current thread identity.
+- Callback acceptance requires a configured HMAC secret, timestamp freshness, exact raw-body verification, immutable amount/currency/business binding, and provider-event idempotency.
+- ADMIN payment/refund recovery requires authentication, an idempotency key, a bounded reason, and durable audit history.
 
-## Database Upgrade
+## Consistency controls
 
-Run only `security-upgrade.sql` for an existing database. The application does not automatically run migrations, clear old Redis data, or change local service configuration.
-Back up the database, stop the old application, and review historical orders, inventory, and queue backlogs before upgrading.
-Initialize a new environment with `event_trading.sql` followed by `security-upgrade.sql`.
-MySQL DDL is not transactional across the entire script. If a step fails, inspect completed statements before applying the remainder.
+- MySQL is authoritative for Event orders and inventory. Redis is not an inventory source of truth.
+- Order creation, reservation creation, and inventory movement share one local transaction.
+- Closure and release share one local transaction; payment confirmation and allocation share another.
+- Guarded updates, unique constraints, fixed lock order, and idempotent reads prevent overselling and duplicate business effects.
+- Gateway calls commit outside local order transactions. Lost responses become `UNKNOWN`; recovery queries the same business number.
+- A late successful charge after closure creates one full compensation refund and never changes inventory again.
+- Recovery work is persistent, leased, bounded, restart-safe, and can become `MANUAL_REQUIRED` instead of being falsely reported as complete.
 
-## Regression Verification
+## Removed attack surface
 
-- `mvn test` and `mvn package` do not connect to personal infrastructure by default.
-- `mvn -Pinfrastructure verify` creates isolated MySQL, Redis, and RabbitMQ test containers.
-- Data-writing preparation tests use the `manual` tag and are excluded by default.
+The current cleanup removes Shop, ShopType, Blog, Follow, UserInfo, upload/image handling, sign-in streaks, merchant Voucher administration, logical-expiry shop caching, and their HTTP/security matchers. Their historical fixes remain recoverable from Git and the engineering asset register; they are no longer current product claims.
 
-Implementation references:
+The optional `legacy-experiment` profile retains only the minimum authenticated Voucher-order adapter plus JDBC transaction, stock-bucket, Outbox, Rabbit topology/listener, metrics, and tests required to reproduce the historical engineering experiment. It is disabled by default.
 
-- https://docs.spring.io/spring-security/reference/servlet/authorization/authorize-http-requests.html
-- https://www.rabbitmq.com/docs/reliability
-- https://docs.spring.io/spring-amqp/reference/amqp/template.html
-- https://docs.spring.io/spring-boot/reference/testing/testcontainers.html
+## Database and runtime boundary
 
-Publisher and consumer acknowledgements do not provide cross-system exactly-once delivery. This project uses durable records and idempotent processing to make retries recoverable.
+Flyway automatically validates and applies immutable migrations V1–V6. `clean` is disabled. Existing databases may use the documented version-2 baseline only after the legacy prerequisite schema is confirmed. No cleanup stage rewrites migrations, clears Redis, manipulates queues, or recreates persistent volumes.
+
+Default Compose starts MySQL and Redis. RabbitMQ and its health contribution are enabled only for `legacy-experiment`. AMQP dependencies remain because that experiment is still compiled and verified.
+
+## Verification
+
+- Default tests do not connect to a personal database.
+- Infrastructure tests use isolated Testcontainers MySQL/Redis/RabbitMQ.
+- Manual data-writing preparation tests remain excluded by the shared `manual` group setting.
+- The 2026-09-18 cleanup candidate passed an IDEA rebuild, 65 default tests, 31 Event integration tests, and one isolated legacy experiment test with no failures or ignored tests.
+
+Publisher confirms and consumer acknowledgements do not create cross-system exactly-once delivery. Future Event messaging must combine durable intent, at-least-once delivery, idempotent effects, bounded retries, and observable manual recovery.

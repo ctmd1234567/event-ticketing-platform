@@ -47,10 +47,6 @@ spring:
     baseline-on-migrate: true
     baseline-version: 2
     clean-disabled: true
-  servlet:
-    multipart:
-      max-file-size: 2MB
-      max-request-size: 3MB
   jackson:
     default-property-inclusion: non_null
 management:
@@ -97,8 +93,6 @@ app:
     admin-user-ids: ${ADMIN_USER_IDS:}
     session-ttl-seconds: ${SESSION_TTL_SECONDS:1800}
     session-refresh-threshold-seconds: ${SESSION_REFRESH_THRESHOLD_SECONDS:900}
-  upload:
-    directory: ${UPLOAD_DIR:./data/images}
   sms:
     mode: ${SMS_MODE:disabled}
     endpoint: ${SMS_ENDPOINT:}

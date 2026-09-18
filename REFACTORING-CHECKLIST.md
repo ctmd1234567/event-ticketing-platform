@@ -112,16 +112,23 @@
 
 推荐执行模型：GPT-5.6 Sol Medium；共享身份和 Security 变更使用 Sol High 检查。
 
-- [ ] 删除 controller 中 Shop、ShopType、Blog、Follow、博客 Upload 入口及对应 service、service/impl、mapper、entity 文件。
-- [ ] 从 UserController、IUserService、UserServiceImpl 删除签到、签到统计和旧社交资料，保留验证码、登录、logout、当前身份。
-- [ ] 删除无剩余用途的 UserInfo、ScrollResult、CacheClient、RedisData、ImageStorage 和专用测试；历史修复经验保留在文档。
-- [ ] 清理 RedisConstants、SystemConstants 中旧功能常量，保留 Token key、用户创建等仍用内容。
-- [ ] 同步修改 SecurityConfig、SecurityRegressionTest、上传配置及 WebExceptionAdvice 的上传专用处理。
-- [ ] MybatisConfig 保留 UserMapper 扫描；分页插件及 POM 依赖只在剩余用途查清后处理。MyBatis-Plus、Hutool、Redis 不可整项盲删。
-- [ ] 对 Voucher/VoucherOrder Controller、Service、Mapper、Entity、VoucherMapper.xml 逐组评估，无剩余用途的删除。
-- [ ] 删除 VoucherServiceImpl 前确认分桶初始化已有有效实验夹具或适配层承接。
-- [ ] 对暂留分桶、限流、信号量、消息和指标代码落实迁移/实验/归档位置；去向完成后移除旧适配，而不是全部永久留在正式业务包。
-- [ ] 不删除数据库表；旧表及迁移与 Java 文件删除分开处理。
+- [x] 删除 controller 中 Shop、ShopType、Blog、Follow、博客 Upload 入口及对应 service、service/impl、mapper、entity 文件。
+- [x] 从 UserController、IUserService、UserServiceImpl 删除签到、签到统计和旧社交资料，保留验证码、登录、logout、当前身份。
+- [x] 删除无剩余用途的 UserInfo、ScrollResult、CacheClient、RedisData、ImageStorage 和专用测试；历史修复经验保留在文档。
+- [x] 清理 RedisConstants、SystemConstants 中旧功能常量，保留 Token key、用户创建等仍用内容。
+- [x] 同步修改 SecurityConfig、SecurityRegressionTest、上传配置及 WebExceptionAdvice 的上传专用处理。
+- [x] MybatisConfig 保留 UserMapper 扫描；分页插件及 POM 依赖只在剩余用途查清后处理。MyBatis-Plus、Hutool、Redis 不可整项盲删。
+- [x] 对 Voucher/VoucherOrder Controller、Service、Mapper、Entity、VoucherMapper.xml 逐组评估，无剩余用途的删除。
+- [x] 删除 VoucherServiceImpl 前确认分桶初始化已有有效实验夹具或适配层承接。
+- [x] 对暂留分桶、限流、信号量、消息和指标代码落实迁移/实验/归档位置；去向完成后移除旧适配，而不是全部永久留在正式业务包。
+- [x] 不删除数据库表；旧表及迁移与 Java 文件删除分开处理。
+
+阶段 D 完成记录（2026-09-18）：
+
+- 移除 Shop、ShopType、Blog、Follow、Upload、旧社交资料与签到，以及无剩余用途的 Voucher/VoucherOrder CRUD 包装；身份链路保留验证码、登录、logout 和当前身份。
+- legacy-experiment 的最小 HTTP 适配层直接承接 OrderTransactions；分桶、限流、信号量、Outbox、消息和指标资产仍按阶段 A 的分类与退出条件保留。
+- MyBatis、Hutool、Redis 均仍有产品用途；AMQP 仍供隔离实验编译与验证。分页扩展在无剩余引用后移除。数据库表与 Flyway V1～V6 未改。
+- IDEA 全量重建 0 问题；65 个默认测试、31 个 Event 集成测试和 1 个隔离实验测试全部通过，0 失败、0 忽略。
 
 完成条件：没有悬空依赖；默认业务只剩 Event；每份暂留旧源码均有保留理由与退出条件；算法和验证资产未因删除包装而丢失。
 
@@ -131,14 +138,20 @@
 
 推荐执行模型：GPT-5.6 Sol Medium；事实冲突由 Sol High 复核。
 
-- [ ] 整理 README.md / README.en.md，以 Event 业务、运行方式、设计亮点和证据为主线。
-- [ ] 旧库存桶、异步成单、415/1500 RPS 进入明确的历史工程实验说明，注明来源版本和测量边界。
-- [ ] PROJECT-REQUIREMENTS.md 对齐私人清单 V1/V2/V3，避免将 SSE、完整告警、备份演练、60min soak 全部作为当前必做项。
-- [ ] SECURITY-FIXES.md 保留历史修复依据，修正或标注支付未实现、不会自动迁移等失效描述。
-- [ ] CHECKLIST-0-6.md、PAYMENT-BOUNDARY-DESIGN.md 补充提交状态，不覆盖原始验收条件和结果。
-- [ ] API-CONTRACT.md 对齐真实响应与幂等规则，不为迁就文档修改已验收接口。
-- [ ] Postman 移除当前商户入口；旧 loadtest 整理为历史/实验材料。完整 Event 请求集合留在第 7 项。
-- [ ] 新增本轮清理验收记录，绑定实际版本或候选 diff；核对 V1～V6 校验值与受保护文件。
+- [x] 整理 README.md / README.en.md，以 Event 业务、运行方式、设计亮点和证据为主线。
+- [x] 旧库存桶、异步成单、415/1500 RPS 进入明确的历史工程实验说明，注明来源版本和测量边界。
+- [x] PROJECT-REQUIREMENTS.md 对齐私人清单 V1/V2/V3，避免将 SSE、完整告警、备份演练、60min soak 全部作为当前必做项。
+- [x] SECURITY-FIXES.md 保留历史修复依据，修正或标注支付未实现、不会自动迁移等失效描述。
+- [x] CHECKLIST-0-6.md、PAYMENT-BOUNDARY-DESIGN.md 补充提交状态，不覆盖原始验收条件和结果。
+- [x] API-CONTRACT.md 对齐真实响应与幂等规则，不为迁就文档修改已验收接口。
+- [x] Postman 移除当前商户入口；旧 loadtest 整理为历史/实验材料。完整 Event 请求集合留在第 7 项。
+- [x] 新增本轮清理验收记录，绑定实际版本或候选 diff；核对 V1～V6 校验值与受保护文件。
+
+阶段 E 完成记录（2026-09-18）：
+
+- README 中英文版已重构为亮点、架构、闭环、能力、证据、快速启动、API、结构和路线图主线；旧 1500 RPS 明确标为缺少原始结果的 Voucher 历史实验，不代表 Event。
+- PROJECT-REQUIREMENTS、SECURITY-FIXES、API-CONTRACT、PAYMENT-BOUNDARY-DESIGN 与 CHECKLIST-0-6 已按当前实现和提交状态校正。
+- 移除旧商户 Postman 定义；Event 请求集合仍留给第 7 项。清理验收、删除依据、保留理由、测试和校验值见 docs/verification/REFACTORING-STAGE-D-E-ACCEPTANCE.md。
 
 完成条件：当前产品、历史成果和未来计划分明；文件链接及运行说明有效；测试结论对应真实版本。
 
@@ -146,11 +159,17 @@
 
 ## F. 第 7 项进入条件——清理验收通过后，另行授权
 
-- [ ] 默认产品只包含 Identity/Security、Event Catalog、同步 Order/Inventory、Payment/Compensation 和必要基础设施。
-- [ ] 0～6 业务规则和事务边界未变；V1～V6 未变。
-- [ ] 工程成果有可追溯且适当可复现的保留位置，不需要长期维护两套对外交易业务。
-- [ ] 再正式处理 Event Demo、请求集合、联合验收和真实写链路基线；先检查已有未跟踪材料，不覆盖或假定它们已通过。
-- [ ] 完善 README 的快速体验、展示和 GitHub 可读性；不得夸大能力或借用旧性能。
+- [x] 默认产品只包含 Identity/Security、Event Catalog、同步 Order/Inventory、Payment/Compensation 和必要基础设施。
+- [x] 0～6 业务规则和事务边界未变；V1～V6 未变。
+- [x] 工程成果有可追溯且适当可复现的保留位置，不需要长期维护两套对外交易业务。
+- [x] 再正式处理 Event Demo、请求集合、联合验收和真实写链路基线；先检查已有未跟踪材料，不覆盖或假定它们已通过。
+- [x] 完善 README 的快速体验、展示和 GitHub 可读性；不得夸大能力或借用旧性能。
+
+阶段 F 门禁核对（2026-09-18）：
+
+- 五项进入条件均已满足；这里的勾选只表示可以进入第 7 项，不表示第 7 项已经执行或验收。
+- 现有五个未跟踪 Demo/基线资产已核对并保持原样；未运行 Event Demo、Event 真实写链路基线，也未建立 Event Postman 集合。随后经单独授权完成的 1500 RPS 高并发工程实验见 docs/verification/CONCURRENCY-EXPERIMENT-1500-RPS-2026-09-18.md，不计作第 7 项 Event 基线。
+- 下一步入口是另行授权第 7 项后，先审计这些未跟踪材料，再完成联合 Demo、请求集合与真实写链路基线。
 
 本阶段属于私人清单第 7 项，不因批准清理 A～E 自动获得实施授权。
 

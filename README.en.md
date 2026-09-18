@@ -1,232 +1,196 @@
-# High-Concurrency Event Trading Platform
+<div align="center">
 
-[Chinese](README.md) | [English](README.en.md)
+# Event Trading Platform
 
-A modular-monolith transaction backend built with Java 21, Spring Boot, MySQL, Redis, and RabbitMQ. The V1 event path creates an order and reserves ticket-tier inventory synchronously; the original voucher and Outbox/RabbitMQ path remains as a compatibility capability.
+### A Java backend that makes the hardest transaction failures executable and testable
 
-## Current Implementation Scope
+**Synchronous ordering · inventory conservation · idempotent retries · payment UNKNOWN recovery · close/payment races · late-charge compensation**
 
-The current baseline implements event, session, and ticket-tier creation, publication, and queries; synchronous orders and inventory reservations; unpaid-order cancellation; database-driven closure; idempotent release; and restart scans. The V1 payment boundary now includes V6 persistence, an independently committed simulated gateway, `UNKNOWN` query/callback recovery, payment-versus-close races, one late-payment compensation refund, owned query/refresh routes, and ADMIN recovery routes. On 2026-09-17, IDEA with Microsoft OpenJDK 21.0.7 passed 26 H2 payment-contract tests, 26 MySQL 8.4 payment-boundary tests, and 7 HTTP/security tests, with no failures or skips. See the [0-6 verification record](docs/verification/CHECKLIST-0-6.md) for scope, evidence, and limitations.
+[![Java 21](https://img.shields.io/badge/Java-21-E76F00?logo=openjdk&logoColor=white)](https://openjdk.org/projects/jdk/21/)
+[![Spring Boot 3.5](https://img.shields.io/badge/Spring%20Boot-3.5.16-6DB33F?logo=springboot&logoColor=white)](https://spring.io/projects/spring-boot)
+[![MySQL 8.4](https://img.shields.io/badge/MySQL-8.4-4479A1?logo=mysql&logoColor=white)](https://www.mysql.com/)
+[![Tests](https://img.shields.io/badge/latest%20verification-97%20tests%20passed-2EA44F)](#verification-evidence)
+[![1500 RPS](https://img.shields.io/badge/concurrency%20experiment-1500%20target%20RPS-7B61FF)](docs/verification/CONCURRENCY-EXPERIMENT-1500-RPS-2026-09-18.md)
+[![GitHub stars](https://img.shields.io/github/stars/ctmd1234567/event-trading-platform?style=social)](https://github.com/ctmd1234567/event-trading-platform)
 
-## Highlights
+[中文](README.md) · [Domain model](docs/architecture/DOMAIN-MODEL.md) · [State machines](docs/architecture/STATE-MACHINES.md) · [API contract](docs/architecture/API-CONTRACT.md) · [Verification](docs/verification/CHECKLIST-0-6.md)
 
-- **MySQL transaction source of truth:** sixteen inventory buckets spread writes for one voucher, while conditional updates and unique constraints prevent overselling and duplicate orders; Redis does not store final transaction state.
-- **V1 event-trading baseline:** an event contains multiple sessions and ticket tiers; one order buys one ticket, snapshots the server-side price, and commits the order and `RESERVED` record in one MySQL transaction.
-- **Recoverable payment boundary:** simulated-provider results commit independently; a lost response remains `UNKNOWN` and recovers under the original payment number, while a charge confirmed after closure creates only one same-number-retry compensation refund and never changes inventory again.
-- **Short transactions and overload protection:** idempotency reads occur outside the transaction, while a fair semaphore bounds in-flight database work and returns `429` quickly under overload.
-- **Transactional publishing intent:** inventory deduction, request creation, and the Outbox event commit in one database transaction; a consumer creates the final order.
-- **Asynchronous messaging:** leased Outbox batches, Confirm/Return checks, persistent messages, transactional batch consumption, a failure queue, and scheduled redelivery are implemented; these mechanisms do not establish that every failure scenario has been tested.
-- **Idempotent requests:** repeating the same purchase returns the original request ID without deducting stock again.
-- **Layered admission control:** one Redis `TIME`-based Lua token-bucket call enforces per-user, per-voucher, and global request limits.
-- **Observability:** a dedicated management port exposes Prometheus metrics for the connection pool, reservation latency, completion lag, admission rejection, and Outbox backlog.
-- **Security boundaries:** token authentication, administrator authorization, atomic code consumption, rate limiting, and request identity cleanup.
-- **Automated verification:** the accepted checklist 0-5 baseline passed 38 default tests; its isolated tests cover Flyway V1-V5, real MySQL, Redis, RabbitMQ, 1,000-request inventory contention, and order lifecycle. Item 6 was separately verified in IDEA by 26 H2 payment-contract, 26 MySQL 8.4 payment-boundary, and 7 HTTP/security tests; the complete default suite was not rerun for this update.
+</div>
 
-## Technology Stack
+---
 
-- Java 21 and Spring Boot 3.5
-- Spring Security and MyBatis-Plus
-- MySQL 8, Redis, and RabbitMQ
-- Maven and Docker Compose
-- JUnit 5, H2, Mockito, Testcontainers, and k6
+## Why this project is different
 
-## Compatibility Voucher Workflow
+This is not a ticketing CRUD app wrapped in a list of technologies. It focuses on real transaction failure boundaries and backs its important claims with deterministic tests:
+
+- **Inventory is a transactional fact, not a cache guess.** One MySQL transaction creates the order and reservation while updating `available / reserved / allocated`, preserving inventory conservation.
+- **A network timeout is not a payment failure.** `UNKNOWN / PROCESSING` outcomes converge through the same business number, signed callbacks, queries, and restart recovery without issuing a second charge.
+- **Commit order decides race winners.** Payment-first allocates inventory. Close-first releases it, and a later confirmed charge creates exactly one full compensation refund without reopening the order.
+- **Tests manufacture the bad paths.** Real MySQL row locks, bounded barriers, lost-response injection, duplicate callbacks, and restarts prove behavior without using `sleep` to guess race order.
+
+## Architecture at a glance
 
 ```mermaid
-flowchart TD
-  A[User submits a purchase request] --> B[Redis Lua applies three admission limits]
-  B --> C{Existing request or order}
-  C -- Yes --> D[Return the original request ID]
-  C -- No --> E[Conditionally decrement one MySQL inventory bucket]
-  E --> F[Create a PENDING request and Outbox event in the transaction]
-  F --> G[Commit and return the request ID]
+flowchart LR
+    Client[Client / Postman] --> Security[Identity & Security]
+    Security --> Catalog[Event Catalog]
+    Security --> Order[Order & Inventory]
+    Order -->|one local transaction| MySQL[(MySQL 8.4)]
+    Catalog --> MySQL
+    Order --> Payment[Payment Orchestration]
+    Payment --> Gateway[Simulated Gateway Boundary]
+    Payment --> MySQL
+    MySQL --> Recovery[Expiry & Payment Recovery]
+    Security <--> Redis[(Redis 7.4)]
 
-  H[Batch-scan and lease Outbox events] --> I[Publish the persistent batch]
-  I --> J[Await Broker Confirms]
-  J -- Failed or returned --> K[Record the error and retry later]
-  K --> H
-  J -- Confirmed --> L[Batch RabbitMQ consumers]
-  L --> M[Lock requests and create orders in batches]
-  M --> N[Batch-mark requests and Outbox events complete]
-  N --> O[ACK after transaction commit]
-  L -- Retries exhausted --> P[Failure queue]
+    subgraph Isolated concurrency experiment
+      Experiment[High-throughput order path] --> Rabbit[(RabbitMQ 4.1)]
+      Experiment --> MySQL
+    end
 ```
 
-The publisher checks both Confirm ACK and Return. A confirm does not prove successful consumer processing or, by itself, routing to the intended queue. The consumer commits request state, final orders, and Outbox completion in one local transaction; the Spring listener container acknowledges afterward. Business uniqueness constraints and request state protect against duplicate delivery.
+The default product runtime contains Identity/Security, Event Catalog, synchronous Order/Inventory, Payment/Compensation, and recovery jobs. RabbitMQ is used only by the isolated concurrency experiment and does not create core Event orders.
 
-The current Outbox `completed` flag means consumer processing completed, not merely successful publication. Events can be republished after lease expiry even after broker confirmation, until the consumer commits. Moving a consumer message to the failure queue does not automatically stop scheduled database publication. This is not an end-to-end bounded-retry or complete DLQ-redrive guarantee.
+## Core business flow
 
-## Implemented Features
+```text
+DRAFT Event
+   └─ publish ─> ON SALE
+                    └─ create order ─> PENDING_PAYMENT + RESERVED
+                                           ├─ payment wins ─> PAID + CONFIRMED + allocated
+                                           └─ cancel/expire ─> CLOSED + RELEASED + available
+                                                                    └─ late charge
+                                                                        └─ one compensation refund
+```
 
-### Identity and security
+Frozen V1 rules: one ticket per order, integer-fen CNY, one order per user and tier, same-key/same-payload replay, and no inventory return after a completed sale refund.
 
-- SMS-code login and token authentication.
-- Sliding token expiration and explicit logout.
-- Administrative endpoint authorization.
-- Authentication-code and source-IP rate limiting.
-- Image type, size, pixel-count, and owner validation.
+## Implemented capabilities
 
-### Transactions and consistency
+### Event and synchronous trading
 
-- Minimal event, session, and ticket-tier creation, publication, sale stopping, and public queries.
-- Synchronous event-order creation with a server-side CNY-fen price snapshot and separate reservation record.
-- Replay of the original order for one user and idempotency key, plus a one-order-per-user-and-tier limit.
-- Authenticated ownership filters for order details and lists; another user's lookup returns not found.
-- Independently persisted simulated payments, signed callbacks, `UNKNOWN`/startup recovery, and same-business-number idempotent recovery.
-- One-time reservation confirmation when payment wins; one full compensation refund when closure wins, with no refund inventory mutation.
-- Owned payment/compensation-refund query and refresh routes plus audited, idempotent ADMIN retries.
-- Vouchers and limited-time purchases.
-- Conditional database inventory deduction.
-- Sixteen MySQL inventory buckets per voucher to spread row-lock contention.
-- Per-user, per-voucher, and global admission control.
-- Fair in-flight transaction limits and fast overload rejection.
-- Idempotency for each user and voucher pair.
-- Order request states: `PENDING` and `COMPLETED`.
-- Transactional Outbox batch publishing and scheduled redelivery.
-- RabbitMQ persistence, Confirm, Return, concurrent consumption, retries, and failure queue.
-- Prometheus metrics for orders, the connection pool, and Outbox state.
+- Event, session, and ticket-tier authoring, publication, off-sale commands, and public reads
+- Server-side price snapshots, sale-window validation, and owner-scoped resources
+- Synchronous order creation, independent reservation facts, idempotency, and purchase limits
+- 1,000 concurrent requests against 100 tickets: 100 reservations, 900 explicit business conflicts, zero technical failures
 
-### Existing compatibility features
+### Lifecycle and recovery
 
-The repository also contains the following shop and social endpoints. Their presence does not establish a complete event-trading domain:
+- User cancellation and timeout closure share one transaction boundary
+- Fixed lock order: `order → reservation → ticket tier`
+- Persistent expiry scanning, failure backoff, and restart recovery
+- Inventory conservation across cancel/expiry and create/release races
 
-- Shop caching, null caching, and logical expiration.
-- Shop category queries.
-- Posts, likes, follows, and check-ins.
-- Image upload, retrieval, and deletion.
+### Payment and compensation
 
-## Quick Start
+- A simulated gateway commits independently from local order transactions
+- Payment create/read/refresh, signed callbacks, and persistent recovery
+- Queryable `UNKNOWN / PROCESSING / MANUAL_REQUIRED` states
+- Exactly one full compensation refund for a confirmed charge after closure, with no second inventory mutation
+- Audited ADMIN recovery with the same business number, idempotency key, and reason
 
-### Requirements
+## Verification evidence
+
+On 2026-09-18, the current cleanup candidate was verified with IntelliJ IDEA 2026.1.3 and Microsoft OpenJDK 21.0.7:
+
+- **65 default tests** covering identity, security, Event, inventory transactions, payment services, controllers, and the simulated gateway
+- **31 Event integration tests**: `EventInfrastructureIT` 3, `EventOrderLifecycleIT` 2, and `PaymentBoundaryIT` 26
+- **1 isolated experiment test**: `LegacyMessagingIT` on Testcontainers MySQL, Redis, and RabbitMQ
+- A full IDEA rebuild completed with zero compilation problems; all 97 test methods had zero failures and zero ignored tests
+
+See the [0–6 verification record](docs/verification/CHECKLIST-0-6.md) and [cleanup acceptance](docs/verification/REFACTORING-STAGE-D-E-ACCEPTANCE.md) for boundaries and limitations. Flyway 11.7.2 still reports a certification warning for MySQL 8.4; migrations and assertions passed, but that is not a production compatibility certification.
+
+## Quick start
+
+### 1. Requirements
 
 - Java 21
-- Maven 3.6.3+
-- Docker Desktop
+- Maven 3.9+
+- Docker Desktop or Docker Engine
 
-### 1. Configure environment variables
-
-Create `.env` in the project root:
+Create an untracked `.env` in the project root:
 
 ```properties
 MYSQL_URL=jdbc:mysql://127.0.0.1:3307/event_trading?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
 MYSQL_USER=root
 MYSQL_PASSWORD=replace-with-a-local-password
-
 REDIS_HOST=127.0.0.1
 REDIS_PORT=6380
-
-RABBITMQ_HOST=127.0.0.1
-RABBITMQ_PORT=5673
-RABBITMQ_USER=event_app
-RABBITMQ_PASSWORD=replace-with-a-local-password
+ADMIN_USER_IDS=1
 ```
 
-`.env` is ignored by Git. Never commit real credentials.
+### 2. Run and verify
 
-### 2. Start the infrastructure
-
-```powershell
+```bash
 docker compose up -d
 docker compose ps
-```
-
-Default ports: MySQL `3307`, Redis `6380`, RabbitMQ `5673`, and RabbitMQ management UI `15673`.
-
-The current source contains Flyway `V1` through `V6`; V6 adds local payment/refund, callback/history, and independent simulated-gateway result tables. On 2026-09-17, `PaymentBoundaryIT` verified all six migrations on a clean MySQL 8.4 database. An existing local database may be baselined at version `2` only after confirming that it already contains the historical base tables and the order/Outbox upgrade; later migrations are then applied, and Flyway clean is disabled. Test seed data exists only under `src/test/resources` and is never loaded into the development database.
-
-### 3. Start the application
-
-```powershell
 mvn test
-mvn '-Dspring-boot.run.profiles=local' spring-boot:run
+mvn -Dspring-boot.run.profiles=local spring-boot:run
 ```
 
-The service listens on `http://127.0.0.1:8081`. The `local` profile returns a development verification code and must only be used for local testing.
+Default Compose starts only MySQL and Redis. The app listens on `http://127.0.0.1:8081`; management endpoints bind to `127.0.0.1:8082`. The `local` profile exposes local verification codes and must never be internet-facing.
 
-## Testing
+Real-dependency integration tests use isolated Testcontainers and do not write to a personal development database:
 
-Default tests do not connect to a personal database:
-
-```powershell
-mvn test
-```
-
-Rerun on 2026-09-15 with the Microsoft OpenJDK 21.0.7 configured by the IDEA project and Maven 3.9.16: **38 tests passed, 0 failed, 0 errors, 0 skipped**.
-
-Run isolated integration tests against real MySQL, Redis, and RabbitMQ services:
-
-```powershell
+```bash
 mvn -Pinfrastructure verify
 ```
 
-On the same date, `InfrastructureIT` was run directly by IDEA: **2 tests passed, 0 failed**. It verifies ordered Flyway `V1` through `V5` migration on an empty MySQL 8.4 database plus real-MySQL event ordering, Redis, RabbitMQ, and 1,000 valid requests contending for 100 tickets: 100 reservations succeeded, 900 were business rejections, and none failed technically, with inventory and reservation conservation verified. `EventOrderLifecycleIT` also passed both tests, covering the 30-second TTL, one-second scan, cancel-versus-expiry and same-tier create-versus-close races, inventory release, and restart recovery; four overdue orders were processed about 43 ms after the restarted application became ready. A separate default-suite test verifies that persisted failure backoff does not starve later candidates. Flyway 11.7.2 warns that its database recognition table has not certified MySQL 8.4; the migrations and assertions pass, but the compatibility warning remains a known limitation. Direct IDEA runs do not create Maven Failsafe reports, so these results are evidenced by the test classes' exit code 0 and complete console output.
+### 3. Concurrency evidence
 
-On 2026-09-17, focused checklist-item-6 acceptance ran through IDEA with Microsoft OpenJDK 21.0.7: `EventPaymentServiceTest` passed **26 tests**, real-MySQL-8.4 `PaymentBoundaryIT` passed **26 tests**, and the payment controller, callback, ADMIN recovery, and security regression classes passed **7 tests** in total; all had zero failures and zero skips. Bounded barriers, real row-lock hooks, and fault injection select race order; no `sleep` is used as race proof. Coverage includes normal payment, lost-response recovery, payment-first, closure-first with exactly one compensation refund, duplicate callbacks/retries, manual handoff, no new charge after closure, and no second inventory change after late payment. This update did not rerun the 38-test complete default suite, run an item-7 joint demo, or benchmark payment throughput. See the [0-6 verification record](docs/verification/CHECKLIST-0-6.md).
+The isolated asynchronous-order experiment preserves the stock-bucketing, admission-control, Outbox, and batch-consumer work without making it part of the default product startup. See the [1500 RPS reverification](docs/verification/CONCURRENCY-EXPERIMENT-1500-RPS-2026-09-18.md) for raw k6 summaries and final database evidence.
 
-## Load Testing
+## API map
 
-`loadtest/` contains a fixed-arrival-rate test for the real order write path, isolated voucher data, and expiring synthetic user tokens. After preparing the isolated data, run:
+- Public catalog: `GET /api/v1/events`, `GET /api/v1/events/{id}`
+- ADMIN catalog commands: create events, sessions, tiers, publish, and take off sale
+- Owned orders: create, read, list, and cancel
+- Payment recovery: create payment, read/refresh payment and compensation refund
+- Trusted callback: `POST /api/v1/payment-callbacks/simulated`
+- ADMIN recovery: inspect work and retry a payment/refund under the same number
 
-```powershell
-$env:RATE='1500'
-$env:DURATION_SECONDS='10'
-$env:VOUCHER_ID='9900021600'
-$env:BASE_URL='http://127.0.0.1:8081'
-k6 run .\loadtest\order-capacity.js
-```
+The [API contract](docs/architecture/API-CONTRACT.md) is the source of truth for request and state semantics.
 
-Capacity runs start the application with temporary per-voucher and global limits of `5000`, so protective limits do not hide the system boundary; normal defaults remain `420/s` per voucher and `800/s` globally. Local single-instance environment: Windows 11, Java 21, Docker MySQL 8.4, Redis 7.4, RabbitMQ 4.1, and k6 v2.2.0. Each request calls the authenticated write endpoint with a distinct synthetic user while RabbitMQ consumers run concurrently. Post-run checks cover inventory, request rows, final orders, duplicate orders, and Outbox backlog.
-
-Previously recorded 10-second fixed-arrival-rate results (not rerun for this documentation update):
-
-P95 below measures the purchase HTTP request, not asynchronous order completion or payment latency. Final orders and Outbox state are checked separately after request acceptance. Each result is limited to the stated experimental conditions.
-
-- 1000 target RPS: P95 34.69 ms; 10,001 requests and final orders; zero rejection, errors, dropped iterations, duplicate orders, or Outbox backlog.
-- 1200 target RPS: P95 12.77 ms; 12,001 requests and final orders; zero rejection, errors, dropped iterations, duplicate orders, or Outbox backlog.
-- 1400 target RPS: P95 17.1 ms; 14,001 requests and final orders; zero rejection, errors, dropped iterations, duplicate orders, or Outbox backlog.
-- 1500 target RPS: P95 14.82 ms; 15,001 requests and final orders; zero rejection, errors, dropped iterations, duplicate orders, or Outbox backlog.
-- 1600 target RPS: P95 109.13 ms; 15,848 of 16,001 requests accepted and 153 received a controlled `429`; no unexpected responses or dropped iterations; every accepted request became one order, with no duplicates or Outbox backlog.
-
-With strict criteria of P95 below one second, zero `429` responses, zero unexpected responses or dropped iterations, no overselling or duplicate orders, and a fully drained Outbox, the highest passing recorded level is 1500 target RPS. The 1600 level produced controlled rejections and failed those criteria. This is a 10-second local single-instance baseline, not an exact maximum capacity, production SLA, payment/refund throughput, or long-running stability result.
-
-## Project Layout
+## Project structure
 
 ```text
-event-trading-platform/
-├─ src/main/java/com/eventplatform/
-│  ├─ config/          # Security, persistence, and messaging
-│  ├─ controller/      # HTTP APIs
-│  ├─ order/           # Order transactions and Outbox
-│  ├─ security/        # Tokens, codes, and rate limits
-│  ├─ service/         # Business logic
-│  └─ upload/          # Image storage
-├─ src/main/resources/
-│  ├─ db/              # Initialization and upgrade scripts
-│  └─ mapper/          # MyBatis XML
-├─ src/test/           # Unit, regression, and integration tests
-├─ docs/               # Architecture and engineering notes
-├─ loadtest/           # k6 write-path tests and isolated data
-├─ postman/            # API requests
-├─ compose.yaml
-└─ pom.xml
+src/main/java/com/eventplatform/
+├── catalog/       Event, Session, TicketTier
+├── controller/    Event, Order, Payment, Identity APIs
+├── order/         Synchronous ordering and expiry; isolated historical experiment
+├── payment/       Gateway boundary, callbacks, UNKNOWN recovery, compensation
+├── security/      Tokens, codes, authorization, rate limiting
+├── service/       Minimal identity service
+└── config/        Security, MyBatis, experimental Rabbit configuration
+
+src/main/resources/db/migration/   immutable Flyway V1–V6
+src/test/                         unit, concurrency, and Testcontainers acceptance
+docs/                             architecture, state machines, API, evidence
+loadtest/                         historical experiment; not Event performance
 ```
 
-## Runtime Boundaries
+## Current boundary and roadmap
 
-- MySQL is the final source of truth for inventory and orders; Redis provides caching, sessions, and admission control.
-- Inventory for one voucher is spread across sixteen MySQL row buckets and summed on reads; existing databases migrate through `db/performance-upgrade.sql`.
-- The legacy purchase endpoint returns a request ID and RabbitMQ creates the final voucher order asynchronously; `/api/v1/orders` creates the event order synchronously in a local transaction.
-- The simulated gateway and local payment state use separate transactions on the same physical MySQL. This verifies a durable boundary, not real funds or a separate-database failure domain. V1 has no user-initiated refund and emits no new payment/refund MQ events.
-- Management port `127.0.0.1:8082` exposes only health and Prometheus endpoints.
-- The local Compose stack is for development and verification, not a production deployment environment.
+- Complete now: V1 checklist items 0–6 and default-runtime cleanup
+- Next: item 7 joint Event demo, request collection, and real-write baseline
+- V2: Event Notification Outbox/MQ, DLQ/redrive, full user refunds, targeted reconciliation, and dependency-failure evidence
+- V3: optional soak, alerting, and backup/recovery evidence; not a completion gate
 
-## Documentation
+Not implemented: user-initiated refunds, Event notifications/SSE, Event Outbox/DLQ, generalized reconciliation, and the item-7 performance baseline.
 
-The architecture documents include target designs and should be distinguished from the current implementation scope above.
+<details>
+<summary><strong>1,500 RPS high-throughput order experiment</strong></summary>
 
-- [Security and consistency](docs/SECURITY-FIXES.md)
-- [Domain model design](docs/architecture/DOMAIN-MODEL.md)
-- [Business state machine design](docs/architecture/STATE-MACHINES.md)
-- [API contract design](docs/architecture/API-CONTRACT.md)
+On 2026-09-18, the current cleanup candidate passed a warmed local single-instance, 10-second constant-arrival-rate rerun: all 15,001 requests were accepted and finalized, HTTP P95 was 106.51 ms, with zero 429s, HTTP failures, unexpected responses, dropped iterations, or duplicate-user orders; the Outbox and Rabbit queues both drained to zero. The initial cold-start run failed the strict gate and is retained alongside the passing run. This measures the stock-bucketing, admission-control, Outbox, and batch-consumer path—not Event payment throughput, a production SLA, or long-run stability. See the [raw evidence and full boundary](docs/verification/CONCURRENCY-EXPERIMENT-1500-RPS-2026-09-18.md).
+
+</details>
+
+## Design documents
+
+- [Domain model and transaction boundaries](docs/architecture/DOMAIN-MODEL.md)
+- [Order, payment, and refund state machines](docs/architecture/STATE-MACHINES.md)
+- [API contract](docs/architecture/API-CONTRACT.md)
 - [Payment boundary design](docs/architecture/PAYMENT-BOUNDARY-DESIGN.md)
-- [Checklist 0-6 verification](docs/verification/CHECKLIST-0-6.md)
+- [Engineering asset register](docs/verification/REFACTORING-STAGE-A-ASSET-REGISTER.md)
+
+If the failure boundaries, tests, or tradeoffs are useful, a ⭐ helps others discover the project. Concrete issues and scenarios are welcome too.

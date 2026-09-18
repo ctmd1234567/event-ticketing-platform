@@ -12,7 +12,7 @@
     <artifactId>event-trading-platform</artifactId>
     <version>0.0.1-SNAPSHOT</version>
     <name>event-trading-platform</name>
-    <description>High-concurrency event trading backend with reliable asynchronous order processing</description>
+    <description>Transactional event trading backend with deterministic payment and inventory recovery</description>
     <properties>
         <test.excludedGroups>manual</test.excludedGroups>
         <java.version>21</java.version>
@@ -87,11 +87,6 @@
         <dependency>
             <groupId>com.baomidou</groupId>
             <artifactId>mybatis-plus-spring-boot3-starter</artifactId>
-            <version>${mybatis-plus.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>com.baomidou</groupId>
-            <artifactId>mybatis-plus-jsqlparser</artifactId>
             <version>${mybatis-plus.version}</version>
         </dependency>
         <dependency>

@@ -100,7 +100,6 @@ class EventInfrastructureIT {
     @Test
     void defaultProductContextDoesNotCreateLegacyOrderProcessingBeans() {
         assertThat(context.getBeansOfType(com.eventplatform.controller.VoucherOrderController.class)).isEmpty();
-        assertThat(context.getBeansOfType(com.eventplatform.service.impl.VoucherOrderServiceImpl.class)).isEmpty();
         assertThat(context.getBeansOfType(com.eventplatform.order.OrderTransactions.class)).isEmpty();
         assertThat(context.getBeansOfType(com.eventplatform.order.OrderPerformance.class)).isEmpty();
         assertThat(context.getBeansOfType(com.eventplatform.order.OutboxPublisher.class)).isEmpty();

@@ -97,7 +97,7 @@ The direct IDEA run is the current lifecycle evidence; it does not generate a Ma
 
 ## 6. Simulated payment boundary, uncertainty, races, and compensation
 
-Status: complete in the current uncommitted candidate and verified with focused IDEA runs; awaiting user review before commit.
+Status: complete, verified, and committed as `ee75182`.
 
 - `V6__event_payments.sql` persists local payments, late-payment compensation refunds, callback receipts, transition/audit history, and separate simulated-gateway payment/refund facts. Gateway calls commit through an independent `REQUIRES_NEW` boundary; local orchestration rejects an ambient transaction and applies provider evidence in a later local transaction.
 - A post-commit fault injector can lose a successful gateway response. The local payment becomes `UNKNOWN`, keeps the original payment number, and converges by signed callback or persisted query recovery without creating another charge.
@@ -126,3 +126,24 @@ This is a deterministic correctness acceptance, not a payment/refund performance
 ## Remaining acceptance boundary
 
 Sections 0 through 6 have passed the checks stated above. Section 7 remains unimplemented and unclaimed: no joint V1 demo, new delivery material, item-7 load run, notification work, or broader MQ/reconciliation expansion was performed as part of item 6.
+
+
+## Post-refactoring revalidation
+
+On 2026-09-18, after the stage-C isolation commit `7b97c0f` and the stage-D
+removal candidate, the retained product and experiment boundaries were rerun in
+IntelliJ IDEA 2026.1.3 with Microsoft OpenJDK 21.0.7:
+
+- the full IDEA rebuild completed with zero reported compilation problems;
+- 65 retained default test methods passed with zero failures;
+- `EventInfrastructureIT` passed 3 tests, `EventOrderLifecycleIT` passed 2, and
+  `PaymentBoundaryIT` passed 26 against isolated MySQL 8.4 containers;
+- `LegacyMessagingIT` passed its single isolated engineering-experiment test.
+
+This is 97 passing test methods in the cleanup acceptance pass: 96 cover the
+default/Event product boundary and one covers the explicitly isolated legacy
+messaging experiment. It is not a Maven aggregate report, capacity benchmark,
+production SLA, or item-7 acceptance. Flyway `V1` through `V6` and the five
+protected untracked assets remained byte-identical; full checksums and the
+candidate diff boundary are recorded in
+[`REFACTORING-STAGE-D-E-ACCEPTANCE.md`](REFACTORING-STAGE-D-E-ACCEPTANCE.md).
