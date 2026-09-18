@@ -2,7 +2,7 @@
 
 # Event Trading Platform
 
-### A Java backend that makes the hardest transaction failures executable and testable
+### A Java backend for event orders, inventory, payments, and recovery
 
 **Synchronous ordering · inventory conservation · idempotent retries · payment UNKNOWN recovery · close/payment races · late-charge compensation**
 
@@ -11,7 +11,6 @@
 [![MySQL 8.4](https://img.shields.io/badge/MySQL-8.4-4479A1?logo=mysql&logoColor=white)](https://www.mysql.com/)
 [![Tests](https://img.shields.io/badge/latest%20verification-97%20tests%20passed-2EA44F)](#verification-evidence)
 [![1500 RPS](https://img.shields.io/badge/concurrency%20experiment-1500%20target%20RPS-7B61FF)](docs/verification/CONCURRENCY-EXPERIMENT-1500-RPS-2026-09-18.md)
-[![GitHub stars](https://img.shields.io/github/stars/ctmd1234567/event-trading-platform?style=social)](https://github.com/ctmd1234567/event-trading-platform)
 
 [中文](README.md) · [Domain model](docs/architecture/DOMAIN-MODEL.md) · [State machines](docs/architecture/STATE-MACHINES.md) · [API contract](docs/architecture/API-CONTRACT.md) · [Verification](docs/verification/CHECKLIST-0-6.md)
 
@@ -19,9 +18,9 @@
 
 ---
 
-## Why this project is different
+## Project focus
 
-This is not a ticketing CRUD app wrapped in a list of technologies. It focuses on real transaction failure boundaries and backs its important claims with deterministic tests:
+The project implements Event transaction boundaries and failure recovery, with tests and acceptance records for its key behaviors:
 
 - **Inventory is a transactional fact, not a cache guess.** One MySQL transaction creates the order and reservation while updating `available / reserved / allocated`, preserving inventory conservation.
 - **A network timeout is not a payment failure.** `UNKNOWN / PROCESSING` outcomes converge through the same business number, signed callbacks, queries, and restart recovery without issuing a second charge.
@@ -100,9 +99,9 @@ On 2026-09-18, the current cleanup candidate was verified with IntelliJ IDEA 202
 
 See the [0–6 verification record](docs/verification/CHECKLIST-0-6.md) and [cleanup acceptance](docs/verification/REFACTORING-STAGE-D-E-ACCEPTANCE.md) for boundaries and limitations. Flyway 11.7.2 still reports a certification warning for MySQL 8.4; migrations and assertions passed, but that is not a production compatibility certification.
 
-## Quick start
+## Run
 
-### 1. Requirements
+### Requirements
 
 - Java 21
 - Maven 3.9+
@@ -119,7 +118,7 @@ REDIS_PORT=6380
 ADMIN_USER_IDS=1
 ```
 
-### 2. Run and verify
+### Start and verify
 
 ```bash
 docker compose up -d
@@ -135,10 +134,6 @@ Real-dependency integration tests use isolated Testcontainers and do not write t
 ```bash
 mvn -Pinfrastructure verify
 ```
-
-### 3. Concurrency evidence
-
-The isolated asynchronous-order experiment preserves the stock-bucketing, admission-control, Outbox, and batch-consumer work without making it part of the default product startup. See the [1500 RPS reverification](docs/verification/CONCURRENCY-EXPERIMENT-1500-RPS-2026-09-18.md) for raw k6 summaries and final database evidence.
 
 ## API map
 
@@ -192,5 +187,3 @@ On 2026-09-18, the current cleanup candidate passed a warmed local single-instan
 - [API contract](docs/architecture/API-CONTRACT.md)
 - [Payment boundary design](docs/architecture/PAYMENT-BOUNDARY-DESIGN.md)
 - [Engineering asset register](docs/verification/REFACTORING-STAGE-A-ASSET-REGISTER.md)
-
-If the failure boundaries, tests, or tradeoffs are useful, a ⭐ helps others discover the project. Concrete issues and scenarios are welcome too.

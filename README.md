@@ -2,7 +2,7 @@
 
 # Event Trading Platform
 
-### 把高并发交易里最难讲清的部分，做成可运行、可验证的 Java 后端
+### 面向活动交易的 Java 后端：订单、库存、支付与故障恢复
 
 **同步下单 · 库存守恒 · 幂等重试 · 支付 UNKNOWN 恢复 · 关单竞争 · 晚到支付补偿**
 
@@ -11,7 +11,6 @@
 [![MySQL 8.4](https://img.shields.io/badge/MySQL-8.4-4479A1?logo=mysql&logoColor=white)](https://www.mysql.com/)
 [![Tests](https://img.shields.io/badge/latest%20verification-97%20tests%20passed-2EA44F)](#验证证据)
 [![1500 RPS](https://img.shields.io/badge/concurrency%20experiment-1500%20target%20RPS-7B61FF)](docs/verification/CONCURRENCY-EXPERIMENT-1500-RPS-2026-09-18.md)
-[![GitHub stars](https://img.shields.io/github/stars/ctmd1234567/event-trading-platform?style=social)](https://github.com/ctmd1234567/event-trading-platform)
 
 [English](README.en.md) · [领域模型](docs/architecture/DOMAIN-MODEL.md) · [状态机](docs/architecture/STATE-MACHINES.md) · [API 合同](docs/architecture/API-CONTRACT.md) · [验收记录](docs/verification/CHECKLIST-0-6.md)
 
@@ -19,9 +18,9 @@
 
 ---
 
-## 为什么这个项目值得看
+## 项目重点
 
-这不是把技术名词堆在 README 里的票务 CRUD。项目围绕真实交易失败边界设计，并为关键结论提供确定性测试：
+项目围绕 Event 交易的事务边界与故障恢复实现，关键行为均有对应测试和验收记录：
 
 - **库存是事务事实，不是缓存猜测**：下单在一个 MySQL 本地事务中创建订单、预占明细并更新 `available / reserved / allocated`，始终满足库存守恒。
 - **网络超时不等于支付失败**：请求超时进入 `UNKNOWN / PROCESSING`，复用同一业务号通过回调、主动查询与重启恢复收敛，避免重复扣款。
@@ -100,9 +99,9 @@ DRAFT Event
 
 完整证据与限制见 [0～6 验收记录](docs/verification/CHECKLIST-0-6.md) 和 [清理验收记录](docs/verification/REFACTORING-STAGE-D-E-ACCEPTANCE.md)。Flyway 11.7.2 对 MySQL 8.4 仍有版本认证提示；迁移与断言实际通过，这不是生产兼容性认证。
 
-## 快速开始
+## 运行
 
-### 1. 环境
+### 环境
 
 - Java 21
 - Maven 3.9+
@@ -119,7 +118,7 @@ REDIS_PORT=6380
 ADMIN_USER_IDS=1
 ```
 
-### 2. 启动与验证
+### 启动与验证
 
 ```bash
 docker compose up -d
@@ -135,10 +134,6 @@ mvn -Dspring-boot.run.profiles=local spring-boot:run
 ```bash
 mvn -Pinfrastructure verify
 ```
-
-### 3. 高并发工程证据
-
-独立的异步订单实验用于保存分桶库存、准入保护、Outbox 与批量消费成果，不属于默认产品启动步骤。最新 1500 RPS 实测、原始 k6 摘要与数据库终态见 [并发实验复测记录](docs/verification/CONCURRENCY-EXPERIMENT-1500-RPS-2026-09-18.md)。
 
 ## API 导航
 
@@ -192,5 +187,3 @@ loadtest/                         历史工程实验；不代表 Event 性能
 - [API 合同](docs/architecture/API-CONTRACT.md)
 - [支付边界设计](docs/architecture/PAYMENT-BOUNDARY-DESIGN.md)
 - [工程资产登记](docs/verification/REFACTORING-STAGE-A-ASSET-REGISTER.md)
-
-如果这个项目里的失败边界、测试方法或取舍对你有帮助，欢迎点一个 ⭐，也欢迎带着具体场景提 Issue。
