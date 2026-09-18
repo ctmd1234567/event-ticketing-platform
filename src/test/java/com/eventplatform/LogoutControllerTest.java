@@ -9,8 +9,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
-/** Replaces the old test that bulk-created and exported live login tokens. */
-class VoucherOrderControllerTest {
+class LogoutControllerTest {
     @Test void logoutRevokesRedisToken() {
         StringRedisTemplate redis=mock(StringRedisTemplate.class);
         UserController controller=new UserController();

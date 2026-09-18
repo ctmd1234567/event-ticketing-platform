@@ -66,11 +66,18 @@
 
 推荐执行模型：GPT-5.6 Sol High。
 
-- [ ] 拆分 InfrastructureIT：Event 验收和旧消息实验各自独立；同步拆分 src/test/resources/db/infrastructure-seed.sql。
-- [ ] 将 VoucherOrderControllerTest 按实际用途改名，保留 logoutRevokesRedisToken 断言。
-- [ ] 拆分 Java21CompatibilityTest 中的旧商户缓存、分页依赖和通用配置验证。
-- [ ] 明确 OrderTransactionsTest、OutboxPublisherTest、RequestLimitsTest 的保留或迁移位置，不因文件名删除断言。
-- [ ] 明确默认验证和工程实验验证入口，仍排除会接触开发数据的 manual 测试。
+- [x] 拆分 InfrastructureIT：Event 验收和旧消息实验各自独立；同步拆分 src/test/resources/db/infrastructure-seed.sql。
+- [x] 将 VoucherOrderControllerTest 按实际用途改名，保留 logoutRevokesRedisToken 断言。
+- [x] 拆分 Java21CompatibilityTest 中的旧商户缓存、分页依赖和通用配置验证。
+- [x] 明确 OrderTransactionsTest、OutboxPublisherTest、RequestLimitsTest 的保留或迁移位置，不因文件名删除断言。
+- [x] 明确默认验证和工程实验验证入口，仍排除会接触开发数据的 manual 测试。
+
+阶段 B 完成记录（2026-09-18）：
+
+- `InfrastructureIT` 已按 Event 基础设施与旧消息实验拆为 `EventInfrastructureIT`、`LegacyMessagingIT`，原组合夹具也按依赖边界拆分；原断言均有明确去向。
+- 登出断言和 Java 21 兼容性断言已分别落入按职责命名的测试类；`OrderTransactionsTest`、`OutboxPublisherTest`、`RequestLimitsTest` 继续作为工程资产验证，不据此声称旧 Voucher 链路属于最终产品。
+- Surefire 与 Failsafe 共用 `test.excludedGroups=manual`；默认、聚焦基础设施和完整非 manual 基础设施入口及测试边界见 `docs/verification/REFACTORING-STAGE-B-TEST-BOUNDARIES.md`。
+- 使用 IntelliJ IDEA MCP 2026.1.3 和 Java 21.0.7 对候选工作区执行 2 个拆分集成测试类及 9 个聚焦默认测试类，共 25 个测试，全部退出码 0；未运行未跟踪脚本或写入开发数据库。
 
 完成条件：原有断言有去向；Event 的 1000 请求竞争 100 库存、旧消息幂等和事务回滚验证保留；夹具使用隔离资源。
 

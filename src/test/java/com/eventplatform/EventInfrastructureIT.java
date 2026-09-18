@@ -1,90 +1,103 @@
 package com.eventplatform;
 
-import com.eventplatform.order.OrderTransactions;
-import com.eventplatform.order.EventOrderService;
 import com.eventplatform.catalog.EventCatalogService;
+import com.eventplatform.order.EventOrderService;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.annotation.DirtiesContext;
-import org.springframework.test.context.*;
 import org.springframework.core.io.ClassPathResource;
+import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.init.ResourceDatabasePopulator;
-import org.springframework.http.HttpStatus;
+import org.springframework.test.annotation.DirtiesContext;
+import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.web.server.ResponseStatusException;
 import org.testcontainers.containers.MySQLContainer;
-import org.testcontainers.containers.GenericContainer;
-import org.testcontainers.containers.RabbitMQContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.containers.wait.strategy.Wait;
+
 import javax.sql.DataSource;
-import static org.assertj.core.api.Assertions.*;
-import static org.awaitility.Awaitility.await;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
+import static org.assertj.core.api.Assertions.assertThat;
+
 @Testcontainers
 @ActiveProfiles("local")
-@SpringBootTest
-class InfrastructureIT {
-    @Container static MySQLContainer<?> mysql=new MySQLContainer<>("mysql:8.4").withDatabaseName("event_trading");
-    @Container static GenericContainer<?> redis=new GenericContainer<>("redis:7.4-alpine")
-            .withExposedPorts(6379).waitingFor(Wait.forListeningPort());
-    @Container static RabbitMQContainer rabbit=new RabbitMQContainer("rabbitmq:4.1-alpine");
-    @DynamicPropertySource static void properties(DynamicPropertyRegistry r) {
-        r.add("spring.datasource.url",() -> {
+@SpringBootTest(properties = {
+        "app.outbox.enabled=false",
+        "app.event-orders.expiry-scan-enabled=false",
+        "app.payment-recovery.enabled=false",
+        "spring.rabbitmq.listener.simple.auto-startup=false"
+})
+class EventInfrastructureIT {
+    @Container
+    static MySQLContainer<?> mysql = new MySQLContainer<>("mysql:8.4")
+            .withDatabaseName("event_trading");
+
+    @DynamicPropertySource
+    static void properties(DynamicPropertyRegistry registry) {
+        registry.add("spring.datasource.url", () -> {
             String url = mysql.getJdbcUrl();
             return url + (url.contains("?") ? "&" : "?") + "serverTimezone=UTC";
         });
-        r.add("spring.datasource.username",mysql::getUsername);
-        r.add("spring.datasource.password",mysql::getPassword);
-        r.add("spring.data.redis.host",redis::getHost);
-        r.add("spring.data.redis.port",() -> redis.getMappedPort(6379));
-        r.add("spring.rabbitmq.host",rabbit::getHost);
-        r.add("spring.rabbitmq.port",rabbit::getAmqpPort);
-        r.add("spring.rabbitmq.username",rabbit::getAdminUsername);
-        r.add("spring.rabbitmq.password",rabbit::getAdminPassword);
+        registry.add("spring.datasource.username", mysql::getUsername);
+        registry.add("spring.datasource.password", mysql::getPassword);
     }
-    @Autowired DataSource source;
-    @Autowired JdbcTemplate db;
-    @Autowired OrderTransactions orders;
-    @Autowired EventOrderService eventOrders;
-    @Autowired EventCatalogService catalog;
-    @Autowired Flyway flyway;
+
+    @Autowired
+    DataSource source;
+
+    @Autowired
+    JdbcTemplate db;
+
+    @Autowired
+    EventOrderService eventOrders;
+
+    @Autowired
+    EventCatalogService catalog;
+
+    @Autowired
+    Flyway flyway;
+
     @DirtiesContext(methodMode = DirtiesContext.MethodMode.AFTER_METHOD)
-    @Test void realFlywayMySqlRedisAndBrokerRoundTrip() throws Exception {
-        assertThat(flyway.info().applied()).extracting(info -> info.getVersion().getVersion())
-            .containsExactly("1", "2", "3", "4", "5", "6");
-        new ResourceDatabasePopulator(new ClassPathResource("db/infrastructure-seed.sql")).execute(source);
-        assertThat(catalog.listEvents()).extracting(EventCatalogService.EventView::id).contains(910001L);
+    @Test
+    void realFlywayMySqlAndEventOrderRoundTrip() {
+        assertThat(flyway.info().applied())
+                .extracting(info -> info.getVersion().getVersion())
+                .containsExactly("1", "2", "3", "4", "5", "6");
+
+        new ResourceDatabasePopulator(new ClassPathResource("db/event-infrastructure-seed.sql"))
+                .execute(source);
+
+        assertThat(catalog.listEvents())
+                .extracting(EventCatalogService.EventView::id)
+                .contains(910001L);
+
         var eventOrder = eventOrders.create(900001, "integration-order-0001", 910001, 1);
+
         assertThat(eventOrder.unitPrice()).isEqualTo(4750);
         assertThat(eventOrder.currency()).isEqualTo("CNY");
-        assertThat(db.queryForMap("SELECT available,reserved,allocated FROM et_ticket_tier WHERE id=910001"))
-                .containsEntry("available", 1).containsEntry("reserved", 1).containsEntry("allocated", 0);
-        var ping = redis.execInContainer("redis-cli", "PING");
-        assertThat(ping.getExitCode()).isZero();
-        assertThat(ping.getStdout()).contains("PONG");
-        long id=orders.reserve(900001,900001);
-        await().atMost(Duration.ofSeconds(30)).untilAsserted(() -> assertThat(orders.status(id,900001)).containsEntry("state","COMPLETED"));
-        orders.fulfill(id);
-        assertThat(db.queryForObject("SELECT COUNT(*) FROM tb_voucher_order WHERE id=?",Integer.class,id)).isEqualTo(1);
-        assertThat(db.queryForObject("SELECT SUM(stock) FROM tb_seckill_voucher_bucket WHERE voucher_id=900001",Integer.class)).isEqualTo(1);
+        assertThat(db.queryForMap(
+                "SELECT available,reserved,allocated FROM et_ticket_tier WHERE id=910001"))
+                .containsEntry("available", 1)
+                .containsEntry("reserved", 1)
+                .containsEntry("allocated", 0);
     }
 
     @DirtiesContext(methodMode = DirtiesContext.MethodMode.AFTER_METHOD)
-    @Test void oneThousandRequestsReserveExactlyOneHundredTickets() throws Exception {
+    @Test
+    void oneThousandRequestsReserveExactlyOneHundredTickets() throws Exception {
         Instant now = Instant.now();
         long eventId = catalog.createEvent(1, "Concurrency acceptance event", null, "Test venue");
         long sessionId = catalog.addSession(eventId, "Main session",
@@ -126,11 +139,15 @@ class InfrastructureIT {
             List<RequestOutcome> outcomes = new ArrayList<>(requestCount);
             for (Future<RequestOutcome> future : futures) {
                 long remaining = deadline - System.nanoTime();
-                assertThat(remaining).as("all 1,000 requests complete within the test budget").isPositive();
+                assertThat(remaining)
+                        .as("all 1,000 requests complete within the test budget")
+                        .isPositive();
                 outcomes.add(future.get(remaining, TimeUnit.NANOSECONDS));
             }
 
-            assertThat(technicalFailures).as("technical failures: %s", technicalFailures).isEmpty();
+            assertThat(technicalFailures)
+                    .as("technical failures: %s", technicalFailures)
+                    .isEmpty();
             assertThat(outcomes).filteredOn(RequestOutcome.RESERVED::equals).hasSize(100);
             assertThat(outcomes).filteredOn(RequestOutcome.BUSINESS_REJECTED::equals).hasSize(900);
             assertThat(outcomes).filteredOn(RequestOutcome.TECHNICAL_FAILED::equals).isEmpty();
