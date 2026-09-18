@@ -1,0 +1,167 @@
+{
+  "info": {
+    "name": "Event Trading Platform - V1",
+    "description": "Callable default-product Event V1 requests. Run with the Local environment and the application local profile. ADMIN_USER_IDS must include the user represented by admin_token. RabbitMQ and legacy-experiment are not used.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "if (!pm.collectionVariables.get('runId')) pm.collectionVariables.set('runId', Date.now().toString());",
+          "const now = Date.now();",
+          "pm.collectionVariables.set('startsAt', new Date(now + 2 * 3600000).toISOString());",
+          "pm.collectionVariables.set('endsAt', new Date(now + 4 * 3600000).toISOString());",
+          "pm.collectionVariables.set('salesStartAt', new Date(now - 60000).toISOString());",
+          "pm.collectionVariables.set('salesEndAt', new Date(now + 3600000).toISOString());"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {"key": "runId", "value": ""},
+    {"key": "startsAt", "value": ""},
+    {"key": "endsAt", "value": ""},
+    {"key": "salesStartAt", "value": ""},
+    {"key": "salesEndAt", "value": ""},
+    {"key": "orderKey", "value": "event-v1-order-{{$guid}}"},
+    {"key": "paymentKey", "value": "event-v1-payment-{{$guid}}"}
+  ],
+  "item": [
+    {
+      "name": "01 Identity",
+      "item": [
+        {
+          "name": "Request ADMIN local code",
+          "request": {"method": "POST", "url": "{{base_url}}/user/code?phone={{admin_phone}}"},
+          "event": [{"listen": "test", "script": {"exec": ["pm.test('code issued', () => pm.response.to.have.status(200));", "pm.environment.set('admin_code', pm.response.json().data.developmentCode);"]}}]
+        },
+        {
+          "name": "Login ADMIN",
+          "request": {"method": "POST", "header": [{"key": "Content-Type", "value": "application/json"}], "body": {"mode": "raw", "raw": "{\"phone\":\"{{admin_phone}}\",\"code\":\"{{admin_code}}\"}"}, "url": "{{base_url}}/user/login"},
+          "event": [{"listen": "test", "script": {"exec": ["pm.test('ADMIN login', () => pm.response.to.have.status(200));", "pm.environment.set('admin_token', pm.response.json().data);"]}}]
+        },
+        {
+          "name": "Request buyer local code",
+          "request": {"method": "POST", "url": "{{base_url}}/user/code?phone={{buyer_phone}}"},
+          "event": [{"listen": "test", "script": {"exec": ["pm.test('code issued', () => pm.response.to.have.status(200));", "pm.environment.set('buyer_code', pm.response.json().data.developmentCode);"]}}]
+        },
+        {
+          "name": "Login buyer",
+          "request": {"method": "POST", "header": [{"key": "Content-Type", "value": "application/json"}], "body": {"mode": "raw", "raw": "{\"phone\":\"{{buyer_phone}}\",\"code\":\"{{buyer_code}}\"}"}, "url": "{{base_url}}/user/login"},
+          "event": [{"listen": "test", "script": {"exec": ["pm.test('buyer login', () => pm.response.to.have.status(200));", "pm.environment.set('token', pm.response.json().data);"]}}]
+        },
+        {
+          "name": "Request other-user local code",
+          "request": {"method": "POST", "url": "{{base_url}}/user/code?phone={{other_phone}}"},
+          "event": [{"listen": "test", "script": {"exec": ["pm.test('code issued', () => pm.response.to.have.status(200));", "pm.environment.set('other_code', pm.response.json().data.developmentCode);"]}}]
+        },
+        {
+          "name": "Login other user",
+          "request": {"method": "POST", "header": [{"key": "Content-Type", "value": "application/json"}], "body": {"mode": "raw", "raw": "{\"phone\":\"{{other_phone}}\",\"code\":\"{{other_code}}\"}"}, "url": "{{base_url}}/user/login"},
+          "event": [{"listen": "test", "script": {"exec": ["pm.test('other login', () => pm.response.to.have.status(200));", "pm.environment.set('other_token', pm.response.json().data);"]}}]
+        },
+        {
+          "name": "Current identity",
+          "request": {"method": "GET", "header": [{"key": "Authorization", "value": "Bearer {{token}}"}], "url": "{{base_url}}/user/me"}
+        }
+      ]
+    },
+    {
+      "name": "02 Event Catalog",
+      "item": [
+        {
+          "name": "Create Event",
+          "request": {"method": "POST", "header": [{"key": "Authorization", "value": "Bearer {{admin_token}}"}, {"key": "Content-Type", "value": "application/json"}], "body": {"mode": "raw", "raw": "{\"title\":\"Postman V1 {{runId}}\",\"description\":\"Event V1 callable collection\",\"venue\":\"local-only\"}"}, "url": "{{base_url}}/api/v1/admin/events"},
+          "event": [{"listen": "test", "script": {"exec": ["pm.test('event created', () => pm.response.to.have.status(200));", "pm.environment.set('eventId', pm.response.json().data);"]}}]
+        },
+        {
+          "name": "Create Session",
+          "request": {"method": "POST", "header": [{"key": "Authorization", "value": "Bearer {{admin_token}}"}, {"key": "Content-Type", "value": "application/json"}], "body": {"mode": "raw", "raw": "{\"name\":\"Evening\",\"startsAt\":\"{{startsAt}}\",\"endsAt\":\"{{endsAt}}\",\"salesStartAt\":\"{{salesStartAt}}\",\"salesEndAt\":\"{{salesEndAt}}\"}"}, "url": "{{base_url}}/api/v1/admin/events/{{eventId}}/sessions"},
+          "event": [{"listen": "test", "script": {"exec": ["pm.test('session created', () => pm.response.to.have.status(200));", "pm.environment.set('sessionId', pm.response.json().data);"]}}]
+        },
+        {
+          "name": "Create Primary Ticket Tier",
+          "request": {"method": "POST", "header": [{"key": "Authorization", "value": "Bearer {{admin_token}}"}, {"key": "Content-Type", "value": "application/json"}], "body": {"mode": "raw", "raw": "{\"name\":\"Standard\",\"unitPrice\":8800,\"currency\":\"CNY\",\"capacity\":10}"}, "url": "{{base_url}}/api/v1/admin/sessions/{{sessionId}}/ticket-tiers"},
+          "event": [{"listen": "test", "script": {"exec": ["pm.test('tier created', () => pm.response.to.have.status(200));", "pm.environment.set('ticketTierId', pm.response.json().data);"]}}]
+        },
+        {
+          "name": "Create Alternate Ticket Tier",
+          "request": {"method": "POST", "header": [{"key": "Authorization", "value": "Bearer {{admin_token}}"}, {"key": "Content-Type", "value": "application/json"}], "body": {"mode": "raw", "raw": "{\"name\":\"Balcony\",\"unitPrice\":6600,\"currency\":\"CNY\",\"capacity\":10}"}, "url": "{{base_url}}/api/v1/admin/sessions/{{sessionId}}/ticket-tiers"},
+          "event": [{"listen": "test", "script": {"exec": ["pm.test('alternate tier created', () => pm.response.to.have.status(200));", "pm.environment.set('alternateTicketTierId', pm.response.json().data);"]}}]
+        },
+        {"name": "Publish Event", "request": {"method": "POST", "header": [{"key": "Authorization", "value": "Bearer {{admin_token}}"}], "url": "{{base_url}}/api/v1/admin/events/{{eventId}}/publish"}},
+        {"name": "List Events", "request": {"method": "GET", "url": "{{base_url}}/api/v1/events"}},
+        {"name": "Get Event", "request": {"method": "GET", "url": "{{base_url}}/api/v1/events/{{eventId}}"}},
+        {"name": "List Ticket Tiers", "request": {"method": "GET", "url": "{{base_url}}/api/v1/sessions/{{sessionId}}/ticket-tiers"}}
+      ]
+    },
+    {
+      "name": "03 Orders and Payment",
+      "item": [
+        {
+          "name": "Create Order",
+          "request": {"method": "POST", "header": [{"key": "Authorization", "value": "Bearer {{token}}"}, {"key": "Idempotency-Key", "value": "event-v1-order-{{runId}}"}, {"key": "Content-Type", "value": "application/json"}], "body": {"mode": "raw", "raw": "{\"ticketTierId\":{{ticketTierId}},\"quantity\":1}"}, "url": "{{base_url}}/api/v1/orders"},
+          "event": [{"listen": "test", "script": {"exec": ["pm.test('order accepted', () => pm.response.to.have.status(200));", "pm.environment.set('orderId', pm.response.json().data.id);"]}}]
+        },
+        {"name": "Replay Same Order", "request": {"method": "POST", "header": [{"key": "Authorization", "value": "Bearer {{token}}"}, {"key": "Idempotency-Key", "value": "event-v1-order-{{runId}}"}, {"key": "Content-Type", "value": "application/json"}], "body": {"mode": "raw", "raw": "{\"ticketTierId\":{{ticketTierId}},\"quantity\":1}"}, "url": "{{base_url}}/api/v1/orders"}},
+        {"name": "List My Orders", "request": {"method": "GET", "header": [{"key": "Authorization", "value": "Bearer {{token}}"}], "url": "{{base_url}}/api/v1/orders"}},
+        {"name": "Get Order", "request": {"method": "GET", "header": [{"key": "Authorization", "value": "Bearer {{token}}"}], "url": "{{base_url}}/api/v1/orders/{{orderId}}"}},
+        {
+          "name": "Create Payment",
+          "request": {"method": "POST", "header": [{"key": "Authorization", "value": "Bearer {{token}}"}, {"key": "Idempotency-Key", "value": "event-v1-payment-{{runId}}"}], "url": "{{base_url}}/api/v1/orders/{{orderId}}/payments"},
+          "event": [{"listen": "test", "script": {"exec": ["pm.test('payment accepted', () => pm.response.to.have.status(200));", "pm.environment.set('paymentId', pm.response.json().data.id);"]}}]
+        },
+        {"name": "Get Payment", "request": {"method": "GET", "header": [{"key": "Authorization", "value": "Bearer {{token}}"}], "url": "{{base_url}}/api/v1/payments/{{paymentId}}"}},
+        {"name": "Refresh Payment", "request": {"method": "POST", "header": [{"key": "Authorization", "value": "Bearer {{token}}"}], "url": "{{base_url}}/api/v1/payments/{{paymentId}}/refresh"}},
+        {
+          "name": "Create Order for Cancellation",
+          "request": {"method": "POST", "header": [{"key": "Authorization", "value": "Bearer {{token}}"}, {"key": "Idempotency-Key", "value": "event-v1-cancel-{{runId}}"}, {"key": "Content-Type", "value": "application/json"}], "body": {"mode": "raw", "raw": "{\"ticketTierId\":{{alternateTicketTierId}},\"quantity\":1}"}, "url": "{{base_url}}/api/v1/orders"},
+          "event": [{"listen": "test", "script": {"exec": ["pm.test('cancel candidate created', () => pm.response.to.have.status(200));", "pm.environment.set('cancelOrderId', pm.response.json().data.id);"]}}]
+        },
+        {
+          "name": "Cancel Pending Order",
+          "request": {"method": "POST", "header": [{"key": "Authorization", "value": "Bearer {{token}}"}], "url": "{{base_url}}/api/v1/orders/{{cancelOrderId}}/cancel"},
+          "event": [{"listen": "test", "script": {"exec": ["pm.test('order canceled', () => pm.response.to.have.status(200));", "pm.test('close reason is USER_CANCELED', () => pm.expect(pm.response.json().data.closeReason).to.eql('USER_CANCELED'));"]}}]
+        },
+        {"name": "Get Compensation Refund (when refundId exists)", "request": {"method": "GET", "header": [{"key": "Authorization", "value": "Bearer {{token}}"}], "url": "{{base_url}}/api/v1/refunds/{{refundId}}"}},
+        {"name": "Refresh Compensation Refund (when refundId exists)", "request": {"method": "POST", "header": [{"key": "Authorization", "value": "Bearer {{token}}"}], "url": "{{base_url}}/api/v1/refunds/{{refundId}}/refresh"}}
+      ]
+    },
+    {
+      "name": "04 Key Error Examples",
+      "item": [
+        {
+          "name": "Idempotency Key Conflict",
+          "request": {"method": "POST", "header": [{"key": "Authorization", "value": "Bearer {{token}}"}, {"key": "Idempotency-Key", "value": "event-v1-order-{{runId}}"}, {"key": "Content-Type", "value": "application/json"}], "body": {"mode": "raw", "raw": "{\"ticketTierId\":{{alternateTicketTierId}},\"quantity\":1}"}, "url": "{{base_url}}/api/v1/orders"},
+          "event": [{"listen": "test", "script": {"exec": ["pm.test('same key different payload conflicts', () => pm.response.to.have.status(409));"]}}]
+        },
+        {
+          "name": "Other User Cannot Read Order",
+          "request": {"method": "GET", "header": [{"key": "Authorization", "value": "Bearer {{other_token}}"}], "url": "{{base_url}}/api/v1/orders/{{orderId}}"},
+          "event": [{"listen": "test", "script": {"exec": ["pm.test('ownership hidden as not found', () => pm.response.to.have.status(404));"]}}]
+        },
+        {
+          "name": "V1 Rejects Quantity Two",
+          "request": {"method": "POST", "header": [{"key": "Authorization", "value": "Bearer {{other_token}}"}, {"key": "Idempotency-Key", "value": "event-v1-invalid-{{runId}}"}, {"key": "Content-Type", "value": "application/json"}], "body": {"mode": "raw", "raw": "{\"ticketTierId\":{{ticketTierId}},\"quantity\":2}"}, "url": "{{base_url}}/api/v1/orders"},
+          "event": [{"listen": "test", "script": {"exec": ["pm.test('quantity rejected', () => pm.response.to.have.status(400));"]}}]
+        },
+        {
+          "name": "Non-ADMIN Cannot Create Event",
+          "request": {"method": "POST", "header": [{"key": "Authorization", "value": "Bearer {{token}}"}, {"key": "Content-Type", "value": "application/json"}], "body": {"mode": "raw", "raw": "{\"title\":\"forbidden\",\"venue\":\"none\"}"}, "url": "{{base_url}}/api/v1/admin/events"},
+          "event": [{"listen": "test", "script": {"exec": ["pm.test('ADMIN route forbidden', () => pm.response.to.have.status(403));"]}}]
+        }
+      ]
+    },
+    {
+      "name": "05 ADMIN Recovery",
+      "item": [
+        {"name": "List Recovery Work", "request": {"method": "GET", "header": [{"key": "Authorization", "value": "Bearer {{admin_token}}"}], "url": "{{base_url}}/api/v1/admin/payment-recovery?limit=50&afterId=0"}},
+        {"name": "Retry Payment (manual item only)", "request": {"method": "POST", "header": [{"key": "Authorization", "value": "Bearer {{admin_token}}"}, {"key": "Idempotency-Key", "value": "event-v1-admin-payment-{{runId}}"}, {"key": "Content-Type", "value": "application/json"}], "body": {"mode": "raw", "raw": "{\"reason\":\"manual recovery verification\"}"}, "url": "{{base_url}}/api/v1/admin/payments/{{paymentId}}/retry"}},
+        {"name": "Retry Refund (manual item only)", "request": {"method": "POST", "header": [{"key": "Authorization", "value": "Bearer {{admin_token}}"}, {"key": "Idempotency-Key", "value": "event-v1-admin-refund-{{runId}}"}, {"key": "Content-Type", "value": "application/json"}], "body": {"mode": "raw", "raw": "{\"reason\":\"manual recovery verification\"}"}, "url": "{{base_url}}/api/v1/admin/refunds/{{refundId}}/retry"}}
+      ]
+    }
+  ]
+}

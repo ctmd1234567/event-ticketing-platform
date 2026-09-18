@@ -2,4 +2,40 @@ name: Local
 values:
   - key: base_url
     value: 'http://127.0.0.1:8081'
+  - key: admin_phone
+    value: '13900007101'
+  - key: buyer_phone
+    value: '13900007102'
+  - key: other_phone
+    value: '13900007103'
+  - key: admin_code
+    value: ''
+  - key: buyer_code
+    value: ''
+  - key: other_code
+    value: ''
+  - key: admin_token
+    value: ''
+  - key: token
+    value: ''
+  - key: other_token
+    value: ''
+  - key: eventId
+    value: ''
+  - key: sessionId
+    value: ''
+  - key: ticketTierId
+    value: ''
+  - key: alternateTicketTierId
+    value: ''
+  - key: orderId
+    value: ''
+  - key: paymentId
+    value: ''
+  - key: cancelOrderId
+    value: ''
+  - key: refundId
+    value: ''
+  - key: callback_secret
+    value: ''
 color: 240

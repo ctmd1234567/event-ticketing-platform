@@ -9,10 +9,9 @@
 [![Java 21](https://img.shields.io/badge/Java-21-E76F00?logo=openjdk&logoColor=white)](https://openjdk.org/projects/jdk/21/)
 [![Spring Boot 3.5](https://img.shields.io/badge/Spring%20Boot-3.5.16-6DB33F?logo=springboot&logoColor=white)](https://spring.io/projects/spring-boot)
 [![MySQL 8.4](https://img.shields.io/badge/MySQL-8.4-4479A1?logo=mysql&logoColor=white)](https://www.mysql.com/)
-[![Tests](https://img.shields.io/badge/latest%20verification-97%20tests%20passed-2EA44F)](#verification-evidence)
-[![1500 RPS](https://img.shields.io/badge/concurrency%20experiment-1500%20target%20RPS-7B61FF)](docs/verification/CONCURRENCY-EXPERIMENT-1500-RPS-2026-09-18.md)
+[![Tests](https://img.shields.io/badge/V1%20verification-96%20tests%20passed-2EA44F)](#verification-evidence)
 
-[中文](README.md) · [Domain model](docs/architecture/DOMAIN-MODEL.md) · [State machines](docs/architecture/STATE-MACHINES.md) · [API contract](docs/architecture/API-CONTRACT.md) · [Verification](docs/verification/CHECKLIST-0-6.md)
+[中文](README.md) · [Domain model](docs/architecture/DOMAIN-MODEL.md) · [State machines](docs/architecture/STATE-MACHINES.md) · [API contract](docs/architecture/API-CONTRACT.md) · [V1 verification](docs/verification/CHECKLIST-0-7.md)
 
 </div>
 
@@ -38,14 +37,12 @@ flowchart LR
     Catalog --> MySQL
     Order --> Payment[Payment Orchestration]
     Payment --> Gateway[Simulated Gateway Boundary]
+    Payment --> Compensation[Compensation Refund]
     Payment --> MySQL
+    Compensation --> Gateway
+    Compensation --> MySQL
     MySQL --> Recovery[Expiry & Payment Recovery]
     Security <--> Redis[(Redis 7.4)]
-
-    subgraph Isolated concurrency experiment
-      Experiment[High-throughput order path] --> Rabbit[(RabbitMQ 4.1)]
-      Experiment --> MySQL
-    end
 ```
 
 The default product runtime contains Identity/Security, Event Catalog, synchronous Order/Inventory, Payment/Compensation, and recovery jobs. RabbitMQ is used only by the isolated concurrency experiment and does not create core Event orders.
@@ -90,14 +87,14 @@ Frozen V1 rules: one ticket per order, integer-fen CNY, one order per user and t
 
 ## Verification evidence
 
-On 2026-09-18, the current cleanup candidate was verified with IntelliJ IDEA 2026.1.3 and Microsoft OpenJDK 21.0.7:
+On 2026-09-18, the current V1 candidate was verified with IntelliJ IDEA 2026.1.3 and Microsoft OpenJDK 21.0.7:
 
 - **65 default tests** covering identity, security, Event, inventory transactions, payment services, controllers, and the simulated gateway
 - **31 Event integration tests**: `EventInfrastructureIT` 3, `EventOrderLifecycleIT` 2, and `PaymentBoundaryIT` 26
-- **1 isolated experiment test**: `LegacyMessagingIT` on Testcontainers MySQL, Redis, and RabbitMQ
-- A full IDEA rebuild completed with zero compilation problems; all 97 test methods had zero failures and zero ignored tests
+- **96 V1 tests in total** with zero failures, errors, or skips; Maven ran the default suite and IDEA/JUnit ran the three integration classes
+- **Real-write baseline**: all 120 default Event trade attempts became final PAID writes, with zero business rejections, technical failures, or dropped results; every inventory and relationship audit passed
 
-See the [0–6 verification record](docs/verification/CHECKLIST-0-6.md) and [cleanup acceptance](docs/verification/REFACTORING-STAGE-D-E-ACCEPTANCE.md) for boundaries and limitations. Flyway 11.7.2 still reports a certification warning for MySQL 8.4; migrations and assertions passed, but that is not a production compatibility certification.
+See the [V1 joint verification record](docs/verification/CHECKLIST-0-7.md) and [real-write baseline result](docs/verification/results/event-v1-baseline-20260918.md) for commands, Demo evidence, versions, database audits, boundaries, and limitations. The isolated `LegacyMessagingIT` is not counted in the 96 Event V1 tests. Flyway 11.7.2 still reports a certification warning for MySQL 8.4; migrations and assertions passed, but that is not a production compatibility certification.
 
 ## Run
 
@@ -135,6 +132,24 @@ Real-dependency integration tests use isolated Testcontainers and do not write t
 mvn -Pinfrastructure verify
 ```
 
+### V1 demo and request collection
+
+Start the application with the `local` profile. Set `EVENT_ORDER_PAYMENT_WINDOW_SECONDS=30` for this process so timeout closure fits the demo budget. `ADMIN_USER_IDS` must include the demo ADMIN identity, or pass an already authenticated `DEMO_ADMIN_TOKEN`. The script creates a fresh Event, Session, and three TicketTiers and does not rely on historical business IDs:
+
+```bash
+EVENT_ORDER_PAYMENT_WINDOW_SECONDS=30 mvn -Dspring-boot.run.profiles=local spring-boot:run
+bash scripts/demo-v1.sh
+```
+
+The demo covers login, public catalog reads, idempotent order creation and reads, normal payment, ownership isolation, user cancellation, timeout closure, and final order/payment/inventory state. The callable collection is [`postman/collections/Event-V1.postman_collection.json`](postman/collections/Event-V1.postman_collection.json) and reuses [`postman/environments/Local.environment.yaml`](postman/environments/Local.environment.yaml). `.postman/resources.yaml` only registers workspace resources for Postman Local View.
+
+The default Event real-write baseline uses an isolated Event/TicketTier and isolated Redis sessions. It performs 120 bounded concurrent order → simulated-payment → final-order-query attempts, then audits inventory, reservations, payments, idempotency results, and unchanged legacy experiment tables:
+
+```bash
+RESULT_FILE=docs/verification/results/event-v1-baseline.md \
+  bash loadtest/event-trading-baseline.sh
+```
+
 ## API map
 
 - Public catalog: `GET /api/v1/events`, `GET /api/v1/events/{id}`
@@ -161,24 +176,20 @@ src/main/java/com/eventplatform/
 src/main/resources/db/migration/   immutable Flyway V1–V6
 src/test/                         unit, concurrency, and Testcontainers acceptance
 docs/                             architecture, state machines, API, evidence
-loadtest/                         historical experiment; not Event performance
+postman/                          Event V1 collection and local environment
+scripts/                          V1 joint demo
+loadtest/                         Event baseline and isolated historical experiment
 ```
 
 ## Current boundary and roadmap
 
-- Complete now: V1 checklist items 0–6 and default-runtime cleanup
-- Next: item 7 joint Event demo, request collection, and real-write baseline
+- Complete now: V1 checklist items 0–7 and the Core Trading joint-acceptance point; see the [joint verification record](docs/verification/CHECKLIST-0-7.md)
 - V2: Event Notification Outbox/MQ, DLQ/redrive, full user refunds, targeted reconciliation, and dependency-failure evidence
 - V3: optional soak, alerting, and backup/recovery evidence; not a completion gate
 
-Not implemented: user-initiated refunds, Event notifications/SSE, Event Outbox/DLQ, generalized reconciliation, and the item-7 performance baseline.
+Not implemented: user-initiated refunds, Event notifications/SSE, Event Outbox/DLQ, generalized reconciliation, CI, and complete OpenAPI.
 
-<details>
-<summary><strong>1,500 RPS high-throughput order experiment</strong></summary>
-
-On 2026-09-18, the current cleanup candidate passed a warmed local single-instance, 10-second constant-arrival-rate rerun: all 15,001 requests were accepted and finalized, HTTP P95 was 106.51 ms, with zero 429s, HTTP failures, unexpected responses, dropped iterations, or duplicate-user orders; the Outbox and Rabbit queues both drained to zero. The initial cold-start run failed the strict gate and is retained alongside the passing run. This measures the stock-bucketing, admission-control, Outbox, and batch-consumer path—not Event payment throughput, a production SLA, or long-run stability. See the [raw evidence and full boundary](docs/verification/CONCURRENCY-EXPERIMENT-1500-RPS-2026-09-18.md).
-
-</details>
+High-throughput engineering experiment (isolated Voucher/Outbox/RabbitMQ write path, including the failed cold-start round, limitations, and raw evidence): [1,500 RPS experiment record](docs/verification/CONCURRENCY-EXPERIMENT-1500-RPS-2026-09-18.md). It is not an Event performance result, production SLA, or long-run stability claim.
 
 ## Design documents
 

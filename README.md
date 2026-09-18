@@ -9,10 +9,9 @@
 [![Java 21](https://img.shields.io/badge/Java-21-E76F00?logo=openjdk&logoColor=white)](https://openjdk.org/projects/jdk/21/)
 [![Spring Boot 3.5](https://img.shields.io/badge/Spring%20Boot-3.5.16-6DB33F?logo=springboot&logoColor=white)](https://spring.io/projects/spring-boot)
 [![MySQL 8.4](https://img.shields.io/badge/MySQL-8.4-4479A1?logo=mysql&logoColor=white)](https://www.mysql.com/)
-[![Tests](https://img.shields.io/badge/latest%20verification-97%20tests%20passed-2EA44F)](#验证证据)
-[![1500 RPS](https://img.shields.io/badge/concurrency%20experiment-1500%20target%20RPS-7B61FF)](docs/verification/CONCURRENCY-EXPERIMENT-1500-RPS-2026-09-18.md)
+[![Tests](https://img.shields.io/badge/V1%20verification-96%20tests%20passed-2EA44F)](#验证证据)
 
-[English](README.en.md) · [领域模型](docs/architecture/DOMAIN-MODEL.md) · [状态机](docs/architecture/STATE-MACHINES.md) · [API 合同](docs/architecture/API-CONTRACT.md) · [验收记录](docs/verification/CHECKLIST-0-6.md)
+[English](README.en.md) · [领域模型](docs/architecture/DOMAIN-MODEL.md) · [状态机](docs/architecture/STATE-MACHINES.md) · [API 合同](docs/architecture/API-CONTRACT.md) · [V1 验收记录](docs/verification/CHECKLIST-0-7.md)
 
 </div>
 
@@ -38,14 +37,12 @@ flowchart LR
     Catalog --> MySQL
     Order --> Payment[Payment Orchestration]
     Payment --> Gateway[Simulated Gateway Boundary]
+    Payment --> Compensation[Compensation Refund]
     Payment --> MySQL
+    Compensation --> Gateway
+    Compensation --> MySQL
     MySQL --> Recovery[Expiry & Payment Recovery]
     Security <--> Redis[(Redis 7.4)]
-
-    subgraph Isolated concurrency experiment
-      Experiment[High-throughput order path] --> Rabbit[(RabbitMQ 4.1)]
-      Experiment --> MySQL
-    end
 ```
 
 默认产品运行时只启用 Identity/Security、Event Catalog、同步 Order/Inventory、Payment/Compensation 和恢复任务。RabbitMQ 仅用于隔离的高并发订单工程实验，不参与 Event 核心订单创建。
@@ -90,14 +87,14 @@ DRAFT Event
 
 ## 验证证据
 
-2026-09-18 使用 IntelliJ IDEA 2026.1.3 和 Microsoft OpenJDK 21.0.7 验证当前清理候选：
+2026-09-18 使用 IntelliJ IDEA 2026.1.3 和 Microsoft OpenJDK 21.0.7 验证当前 V1 候选：
 
 - **65 个默认测试**：身份、安全、Event、库存事务、支付服务、控制器和模拟网关
 - **31 个 Event 集成测试**：`EventInfrastructureIT` 3、`EventOrderLifecycleIT` 2、`PaymentBoundaryIT` 26
-- **1 个隔离实验测试**：`LegacyMessagingIT` 在 Testcontainers MySQL/Redis/RabbitMQ 上验证保留链路
-- IDEA 全量重建成功，0 个编译问题；上述 97 个测试方法均为 0 失败、0 忽略
+- **合计 96 个 V1 测试**：0 失败、0 错误、0 忽略；默认套件由 Maven 执行，三个集成类由 IDEA/JUnit 执行
+- **真实写基线**：120 次默认 Event 完整交易全部形成最终 PAID 写入，0 业务拒绝、0 技术失败、0 丢弃；库存和关联审计全部通过
 
-完整证据与限制见 [0～6 验收记录](docs/verification/CHECKLIST-0-6.md) 和 [清理验收记录](docs/verification/REFACTORING-STAGE-D-E-ACCEPTANCE.md)。Flyway 11.7.2 对 MySQL 8.4 仍有版本认证提示；迁移与断言实际通过，这不是生产兼容性认证。
+完整命令、Demo、版本、数据库审计与限制见 [V1 联合验收记录](docs/verification/CHECKLIST-0-7.md) 和 [真实写基线结果](docs/verification/results/event-v1-baseline-20260918.md)。隔离的 `LegacyMessagingIT` 不计入 Event V1 的 96 项结果。Flyway 11.7.2 对 MySQL 8.4 仍有版本认证提示；迁移与断言实际通过，这不是生产兼容性认证。
 
 ## 运行
 
@@ -135,6 +132,24 @@ mvn -Dspring-boot.run.profiles=local spring-boot:run
 mvn -Pinfrastructure verify
 ```
 
+### V1 Demo 与请求集合
+
+以 `local` profile 启动应用；为了在演示预算内看到超时关闭，在本次进程中设置 `EVENT_ORDER_PAYMENT_WINDOW_SECONDS=30`。`ADMIN_USER_IDS` 必须包含演示 ADMIN 身份；也可传入已登录的 `DEMO_ADMIN_TOKEN`。脚本动态创建 Event、Session 和三个 TicketTier，不依赖历史业务 ID：
+
+```bash
+EVENT_ORDER_PAYMENT_WINDOW_SECONDS=30 mvn -Dspring-boot.run.profiles=local spring-boot:run
+bash scripts/demo-v1.sh
+```
+
+Demo 覆盖登录、公开目录查询、幂等下单与查询、正常支付、所有权隔离、用户取消、超时关闭及最终订单/支付/库存状态。完整 Event 请求集合位于 [`postman/collections/Event-V1.postman_collection.json`](postman/collections/Event-V1.postman_collection.json)，复用 [`postman/environments/Local.environment.yaml`](postman/environments/Local.environment.yaml)；`.postman/resources.yaml` 只负责 Postman Local View 工作区注册。
+
+默认 Event 真实写基线使用隔离 Event/TicketTier 和 Redis 会话，执行 120 次“下单 → 模拟支付 → 查询最终订单”的有界并发尝试，并在结束时审计库存、预留、支付、幂等结果和旧实验表未变：
+
+```bash
+RESULT_FILE=docs/verification/results/event-v1-baseline.md \
+  bash loadtest/event-trading-baseline.sh
+```
+
 ## API 导航
 
 - 公开目录：`GET /api/v1/events`、`GET /api/v1/events/{id}`
@@ -161,24 +176,20 @@ src/main/java/com/eventplatform/
 src/main/resources/db/migration/   Flyway V1～V6（不可回写）
 src/test/                         单元、并发与 Testcontainers 验收
 docs/                             架构、状态机、API 与验证证据
-loadtest/                         历史工程实验；不代表 Event 性能
+postman/                          Event V1 请求集合与本地环境
+scripts/                          V1 联合 Demo
+loadtest/                         Event 基线与隔离的历史工程实验
 ```
 
 ## 当前边界与路线图
 
-- 当前完成：V1 清单 0～6，以及旧业务清理和默认运行时收敛
-- 下一步：第 7 项 Event 联合 Demo、请求集合和真实写链路基线
+- 当前完成：V1 清单 0～7，达到 Core Trading 联合验收点；证据见[联合验收记录](docs/verification/CHECKLIST-0-7.md)
 - V2：Event Notification Outbox/MQ、DLQ/redrive、用户全额退款、针对性对账和故障证据
 - V3：按需要选择 Soak、告警、备份恢复等增强；不是项目完成门槛
 
-未实现：用户主动退款、Event 通知/SSE、Event Outbox/DLQ、通用对账框架和第 7 项性能基线。
+未实现：用户主动退款、Event 通知/SSE、Event Outbox/DLQ、通用对账框架、CI 和完整 OpenAPI。
 
-<details>
-<summary><strong>1500 RPS 高并发订单工程实验</strong></summary>
-
-2026-09-18 在当前清理候选上完成本地单实例、10 秒恒定到达率复测：预热后 15,001 个请求全部接受并最终成单，HTTP P95 106.51 ms，0 个 429、HTTP 失败、异常响应、丢弃迭代和重复用户订单；Outbox 与 Rabbit 队列最终均为 0。首次冷启动轮未通过严格门槛，因此同时保留，不从证据中删除。该结果验证分桶库存、准入保护、Outbox 与批量消费链路，不代表 Event 支付吞吐、生产 SLA 或长期稳定性。详见 [原始证据与完整边界](docs/verification/CONCURRENCY-EXPERIMENT-1500-RPS-2026-09-18.md)。
-
-</details>
+高并发工程实验（隔离的 Voucher/Outbox/RabbitMQ 写链路，包含失败冷启动轮次、限制和原始证据）：[1500 RPS 实验记录](docs/verification/CONCURRENCY-EXPERIMENT-1500-RPS-2026-09-18.md)。该实验不代表 Event 性能、生产 SLA 或长期稳定性。
 
 ## 设计文档
 
