@@ -1,6 +1,7 @@
 SET @event_id = 9900070001;
 SET @session_id = 9900070002;
 SET @tier_id = 9900070003;
+SET @capacity = COALESCE(@capacity, 100);
 
 DELETE h FROM et_payment_history h
 JOIN et_payment p ON p.id=h.payment_id
@@ -36,7 +37,7 @@ VALUES (@session_id,@event_id,'Baseline session',CURRENT_TIMESTAMP + INTERVAL 2 
         CURRENT_TIMESTAMP + INTERVAL 1 HOUR,'ON_SALE');
 INSERT INTO et_ticket_tier(id,session_id,name,unit_price,currency,capacity,available,reserved,allocated,
                            purchase_limit_per_user,status)
-VALUES (@tier_id,@session_id,'Baseline tier',8800,'CNY',200,200,0,0,1,'ON_SALE');
+VALUES (@tier_id,@session_id,'Baseline tier',8800,'CNY',@capacity,@capacity,0,0,1,'ON_SALE');
 
 SELECT id,capacity,available,reserved,allocated,status
 FROM et_ticket_tier WHERE id=@tier_id;

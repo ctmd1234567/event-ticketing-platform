@@ -1,6 +1,6 @@
 # Event Trading Platform Requirements
 
-Updated: 2026-09-18
+Updated: 2026-09-19
 
 This document separates the implemented product, the next main-project increments, and optional evidence. Technology names are not acceptance criteria by themselves; behavior and claims require code plus reproducible verification.
 
@@ -10,7 +10,7 @@ Build a focused modular-monolith backend for event catalog, ticket inventory, or
 
 ## V1 — core trading
 
-### Implemented and verified: checklist items 0–6
+### Implemented and verified
 
 - Java 21 / Spring Boot modular monolith with Flyway V1–V6.
 - ADMIN event, session, and ticket-tier authoring; public catalog reads.
@@ -21,17 +21,16 @@ Build a focused modular-monolith backend for event catalog, ticket inventory, or
 - Simulated payment gateway with independent commit, `UNKNOWN / PROCESSING`, signed callbacks, query recovery, bounded manual handoff, and late-charge compensation.
 - Deterministic unit and real-MySQL concurrency/race verification.
 
-### Remaining V1 delivery work: checklist item 7
+### Verification assets
 
-- A coherent Event demo path and request collection.
-- A newly measured Event real-write baseline with isolated data and explicit limits.
-- Final delivery notes that distinguish current product behavior from historical engineering experiments.
-
-Item 7 has not been implemented or claimed by the cleanup stages.
+- A reproducible HTTP happy-path demo creates isolated Event data and verifies order, payment, and inventory state.
+- A bounded authenticated Event order baseline records business outcomes, latency percentiles, and final database invariants.
+- Java 21 CI runs both the default test suite and the Testcontainers infrastructure profile.
+- The public verification record distinguishes current product behavior from historical engineering experiments.
 
 ## V2 — main-project completion target
 
-Planned checklist items 8–12:
+Planned next increments:
 
 - Event notification intent stored transactionally with committed business changes.
 - RabbitMQ publication with lease/retry, Confirm/Return handling, consumer idempotency, post-commit ACK, bounded retry, DLQ metadata, and safe redrive.

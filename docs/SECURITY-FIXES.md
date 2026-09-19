@@ -1,8 +1,6 @@
 # Security and Consistency Record
 
-Updated: 2026-09-18
-
-Historical baseline: `cd293f3`. Current payment baseline: `ee75182`. Cleanup profiles and test boundaries are committed through `7b97c0f`; the current D/E candidate removes the remaining shop/social/upload surface.
+Updated: 2026-09-19
 
 ## Current controls
 
@@ -27,7 +25,7 @@ Historical baseline: `cd293f3`. Current payment baseline: `ee75182`. Cleanup pro
 
 ## Removed attack surface
 
-The current cleanup removes Shop, ShopType, Blog, Follow, UserInfo, upload/image handling, sign-in streaks, merchant Voucher administration, logical-expiry shop caching, and their HTTP/security matchers. Their historical fixes remain recoverable from Git and the engineering asset register; they are no longer current product claims.
+The default product excludes the former Shop, Blog, Follow, upload/image, sign-in, merchant Voucher administration, and logical-expiry shop-cache HTTP surfaces. Historical implementation remains recoverable from Git; it is not part of the current product claim.
 
 The optional `legacy-experiment` profile retains only the minimum authenticated Voucher-order adapter plus JDBC transaction, stock-bucket, Outbox, Rabbit topology/listener, metrics, and tests required to reproduce the historical engineering experiment. It is disabled by default.
 
@@ -42,6 +40,6 @@ Default Compose starts MySQL and Redis. RabbitMQ and its health contribution are
 - Default tests do not connect to a personal database.
 - Infrastructure tests use isolated Testcontainers MySQL/Redis/RabbitMQ.
 - Manual data-writing preparation tests remain excluded by the shared `manual` group setting.
-- The 2026-09-18 cleanup candidate passed an IDEA rebuild, 65 default tests, 31 Event integration tests, and one isolated legacy experiment test with no failures or ignored tests.
+- The V1 verification record covers the default suite and the Event Testcontainers integration suite; CI runs both Maven entry points on Java 21.
 
 Publisher confirms and consumer acknowledgements do not create cross-system exactly-once delivery. Future Event messaging must combine durable intent, at-least-once delivery, idempotent effects, bounded retries, and observable manual recovery.

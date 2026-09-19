@@ -154,12 +154,10 @@ class EventOrderLifecycleIT {
         String jdbcUrl = mysql.getJdbcUrl()
                 + (mysql.getJdbcUrl().contains("?") ? "&" : "?") + "serverTimezone=UTC";
         return new SpringApplicationBuilder(EventTradingPlatformApplication.class)
-                .web(WebApplicationType.SERVLET)
+                .web(WebApplicationType.NONE)
                 .run("--spring.datasource.url=" + jdbcUrl,
                         "--spring.datasource.username=" + mysql.getUsername(),
                         "--spring.datasource.password=" + mysql.getPassword(),
-                        "--server.port=0",
-                        "--management.server.port=0",
                         "--app.event-orders.payment-window-seconds=30",
                         "--app.event-orders.expiry-scan-interval-ms=1000",
                         "--app.event-orders.expiry-scan-batch-size=100",

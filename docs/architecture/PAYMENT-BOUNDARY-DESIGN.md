@@ -1,16 +1,10 @@
-# Checklist 6.1: Payment Boundary Design
+# Payment Boundary Design
 
 Date: 2026-09-16
 
-Baseline reviewed: `5bbf8c8` (checklist 0–5).
-
-Status: checklist item 6 was committed as `ee75182`. On 2026-09-18, the
-post-refactoring candidate based on `7b97c0f` was rebuilt and reverified with
-Microsoft OpenJDK 21.0.7: all 26 H2 payment tests, all 26 MySQL 8.4
-payment-boundary tests, and the retained controller/security coverage passed.
-The complete evidence and explicit limitations are in [the 0-6 verification
-record](../verification/CHECKLIST-0-6.md) and [the D/E cleanup acceptance
-record](../verification/REFACTORING-STAGE-D-E-ACCEPTANCE.md).
+This document describes the implemented V1 payment, recovery, callback, and
+late-charge compensation boundaries. Current commands, results, and limitations
+are recorded in the [V1 verification record](../verification/V1-VERIFICATION.md).
 
 ## Scope and invariants
 
@@ -28,8 +22,8 @@ record](../verification/REFACTORING-STAGE-D-E-ACCEPTANCE.md).
 - Compensation never updates inventory or reservation state. The released ticket
   may already belong to another buyer.
 - `available + reserved + allocated = capacity`; each counter is nonnegative.
-- No user-requested refunds, notifications, MQ changes, generalized
-  reconciliation framework, benchmark, or section-7 demo script in this increment.
+- User-requested refunds, Event notifications/MQ, and generalized reconciliation
+  remain outside V1.
 
 ## V6 storage contract
 
@@ -235,42 +229,21 @@ exhausted command budget. Administrative retry first queries existing results;
 it cannot mark success manually. Other users receive 404. No user-facing gateway
 fault switches, refund-create endpoint, or global response-envelope rewrite.
 
-## Implementation slices and acceptance gates
+## Implementation and verification
 
-1. 6.2: `V6__event_payments.sql` implements the storage contract. The existing
-   real-MySQL infrastructure test now expects V1 through V6. On 2026-09-17,
-   `PaymentBoundaryIT` verified all six migrations on a clean MySQL 8.4
-   database. The later cleanup acceptance reran the split
-   `EventInfrastructureIT` (3 tests) against Flyway `V1` through `V6`.
-2. 6.3: `JdbcSimulatedPaymentGateway` provides the simulated-gateway
-   interface/implementation and post-commit response-loss wrapper. Its focused
-   tests verify that payment and refund results survive a lost response and
-   caller rollback.
-3. 6.4: `EventPaymentService` now provides local payment orchestration/result
-   transactions; `EventOrderService` treats a paid expiry candidate as a no-op.
-   See [the scoped verification record](../verification/CHECKLIST-6-4.md).
-4. 6.5: `PaymentCallbackService` now authenticates signed simulated payment
-   callbacks, persists idempotent receipts, and applies them atomically with
-   payment state. `PaymentRecoveryScanner` claims and queries durable
-   `PROCESSING`/`UNKNOWN` payment work and retries received receipts after a
-   business-transaction crash. See [the scoped verification record](../verification/CHECKLIST-6-5.md).
-5. 6.6: `EventRefundService` creates the unique late-payment compensation intent
-   in the payment-result transaction, then executes/query-recovers the refund by
-   its original number outside that transaction. Failures remain queryable and
-   require an audited idempotent operator retry.
-6. 6.7: payment, compensation-refund, exact simulated-callback, and bounded ADMIN
-   recovery controllers are implemented. Ownership, callback signature/raw-body
-   handling, and the exact public security matcher have focused tests.
-7. 6.8: `PaymentBoundaryIT` runs the shared 26-case contract on real MySQL 8.4.
-   Bounded latches, real row-lock hooks, candidate-selection hooks, and post-commit
-   fault injection force both race winners, response loss, callback/recovery
-   duplication, local rollback after gateway success, restart recovery, exhausted
-   manual recovery, and resale before late payment. No sleep selects a winner.
-8. 6.9: static review, IDEA compilation, the H2/MySQL/controller/security runs,
-   `CHECKLIST-0-6.md`, both READMEs, and the broader API/state-machine documents
-   now record only the observed evidence and current boundaries.
-
-The implementation deliberately stops at item 6. It adds no user-created refunds,
-notifications, Event MQ events, general reconciliation framework, benchmark, or
-item-7 demo/delivery work. Item 6 is committed at `ee75182`; the current D/E/F
-cleanup candidate remains uncommitted, and item 7 has not started.
+- `V6__event_payments.sql` implements the storage contract and is applied with
+  the other immutable migrations on clean MySQL 8.4 containers.
+- `JdbcSimulatedPaymentGateway` provides an independently committed simulated
+  provider and post-commit response-loss injection.
+- `EventPaymentService` owns local payment orchestration and result application;
+  `EventOrderService` treats a paid expiry candidate as a no-op.
+- `PaymentCallbackService` authenticates callbacks, persists idempotent receipts,
+  and applies trusted results atomically. `PaymentRecoveryScanner` claims and
+  queries durable `PROCESSING` and `UNKNOWN` work.
+- `EventRefundService` creates and recovers the unique full late-payment
+  compensation without changing inventory a second time.
+- Payment, compensation-refund, callback, and bounded ADMIN recovery controllers
+  enforce ownership, signatures, idempotency, reasons, and audit history.
+- The shared 26-case contract runs against both service-level tests and real
+  MySQL 8.4. Deterministic latches and row-lock hooks force race winners and
+  recovery paths without using timing sleeps to select outcomes.

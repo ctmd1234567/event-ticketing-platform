@@ -9,9 +9,10 @@
 [![Java 21](https://img.shields.io/badge/Java-21-E76F00?logo=openjdk&logoColor=white)](https://openjdk.org/projects/jdk/21/)
 [![Spring Boot 3.5](https://img.shields.io/badge/Spring%20Boot-3.5.16-6DB33F?logo=springboot&logoColor=white)](https://spring.io/projects/spring-boot)
 [![MySQL 8.4](https://img.shields.io/badge/MySQL-8.4-4479A1?logo=mysql&logoColor=white)](https://www.mysql.com/)
-[![Tests](https://img.shields.io/badge/V1%20verification-96%20tests%20passed-2EA44F)](#verification-evidence)
+[![Tests](https://img.shields.io/badge/verification-123%20tests%20passed-2EA44F)](#verification-evidence)
+[![CI](https://github.com/ctmd1234567/event-trading-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/ctmd1234567/event-trading-platform/actions/workflows/ci.yml)
 
-[中文](README.md) · [Domain model](docs/architecture/DOMAIN-MODEL.md) · [State machines](docs/architecture/STATE-MACHINES.md) · [API contract](docs/architecture/API-CONTRACT.md) · [V1 verification](docs/verification/CHECKLIST-0-7.md)
+[中文](README.md) · [Domain model](docs/architecture/DOMAIN-MODEL.md) · [State machines](docs/architecture/STATE-MACHINES.md) · [API contract](docs/architecture/API-CONTRACT.md) · [V1 verification](docs/verification/V1-VERIFICATION.md)
 
 </div>
 
@@ -87,14 +88,14 @@ Frozen V1 rules: one ticket per order, integer-fen CNY, one order per user and t
 
 ## Verification evidence
 
-On 2026-09-18, the current V1 candidate was verified with IntelliJ IDEA 2026.1.3 and Microsoft OpenJDK 21.0.7:
+On 2026-09-19, the current V1 candidate was verified with Microsoft OpenJDK 21.0.7 and Maven 3.9.16:
 
 - **65 default tests** covering identity, security, Event, inventory transactions, payment services, controllers, and the simulated gateway
-- **31 Event integration tests**: `EventInfrastructureIT` 3, `EventOrderLifecycleIT` 2, and `PaymentBoundaryIT` 26
-- **96 V1 tests in total** with zero failures, errors, or skips; Maven ran the default suite and IDEA/JUnit ran the three integration classes
-- **Real-write baseline**: all 120 default Event trade attempts became final PAID writes, with zero business rejections, technical failures, or dropped results; every inventory and relationship audit passed
+- **58 infrastructure-profile integration tests**: 57 cover Event V1, plus one isolated historical RabbitMQ experiment test
+- **123 tests in total** with zero failures, errors, or skips; `mvn -Pinfrastructure verify` runs both the default and Testcontainers integration suites
+- **Event order baseline**: 200 authenticated `POST /api/v1/orders` calls produced 100 successes, 100 explicit business conflicts, zero technical failures, and zero dropped attempts; P50/P95/P99 were 0.012996/0.040840/0.048521 seconds and all inventory and relationship audits passed
 
-See the [V1 joint verification record](docs/verification/CHECKLIST-0-7.md) and [real-write baseline result](docs/verification/results/event-v1-baseline-20260918.md) for commands, Demo evidence, versions, database audits, boundaries, and limitations. The isolated `LegacyMessagingIT` is not counted in the 96 Event V1 tests. Flyway 11.7.2 still reports a certification warning for MySQL 8.4; migrations and assertions passed, but that is not a production compatibility certification.
+See the [V1 verification record](docs/verification/V1-VERIFICATION.md) and [Event order baseline result](docs/verification/results/event-order-creation-baseline-20260919.md) for commands, Demo evidence, versions, database audits, boundaries, and limitations. Flyway 11.7.2 still reports a certification warning for MySQL 8.4; migrations and assertions passed, but that is not a production compatibility certification.
 
 ## Run
 
@@ -132,21 +133,21 @@ Real-dependency integration tests use isolated Testcontainers and do not write t
 mvn -Pinfrastructure verify
 ```
 
-### V1 demo and request collection
+### V1 demo
 
-Start the application with the `local` profile. Set `EVENT_ORDER_PAYMENT_WINDOW_SECONDS=30` for this process so timeout closure fits the demo budget. `ADMIN_USER_IDS` must include the demo ADMIN identity, or pass an already authenticated `DEMO_ADMIN_TOKEN`. The script creates a fresh Event, Session, and three TicketTiers and does not rely on historical business IDs:
+Start the application with the `local` profile and include the demo ADMIN identity in `ADMIN_USER_IDS`, or pass an authenticated, allowlisted `DEMO_ADMIN_TOKEN`. The script creates a fresh Event, Session, and one TicketTier and does not rely on historical business IDs:
 
 ```bash
-EVENT_ORDER_PAYMENT_WINDOW_SECONDS=30 mvn -Dspring-boot.run.profiles=local spring-boot:run
+mvn -Dspring-boot.run.profiles=local spring-boot:run
 bash scripts/demo-v1.sh
 ```
 
-The demo covers login, public catalog reads, idempotent order creation and reads, normal payment, ownership isolation, user cancellation, timeout closure, and final order/payment/inventory state. The callable collection is [`postman/collections/Event-V1.postman_collection.json`](postman/collections/Event-V1.postman_collection.json) and reuses [`postman/environments/Local.environment.yaml`](postman/environments/Local.environment.yaml). `.postman/resources.yaml` only registers workspace resources for Postman Local View.
+The demo deliberately covers only the reliable happy path: login, dynamic catalog setup and publication, public reads, idempotent order creation and reads, reserved inventory, normal payment, and final order/payment/inventory state. The existing callable collection remains at [`postman/collections/Event-V1.postman_collection.json`](postman/collections/Event-V1.postman_collection.json).
 
-The default Event real-write baseline uses an isolated Event/TicketTier and isolated Redis sessions. It performs 120 bounded concurrent order → simulated-payment → final-order-query attempts, then audits inventory, reservations, payments, idempotency results, and unchanged legacy experiment tables:
+The Event order baseline uses an isolated Event/TicketTier and Redis sessions. Independent authenticated users concurrently call `POST /api/v1/orders`; the runner records successes, business conflicts, technical failures, and P50/P95/P99, then audits inventory conservation and duplicate effective orders/reservations:
 
 ```bash
-RESULT_FILE=docs/verification/results/event-v1-baseline.md \
+RESULT_FILE=docs/verification/results/event-order-creation-baseline.md \
   bash loadtest/event-trading-baseline.sh
 ```
 
@@ -183,11 +184,11 @@ loadtest/                         Event baseline and isolated historical experim
 
 ## Current boundary and roadmap
 
-- Complete now: V1 checklist items 0–7 and the Core Trading joint-acceptance point; see the [joint verification record](docs/verification/CHECKLIST-0-7.md)
+- Complete now: V1 Core Trading; see the [V1 verification record](docs/verification/V1-VERIFICATION.md)
 - V2: Event Notification Outbox/MQ, DLQ/redrive, full user refunds, targeted reconciliation, and dependency-failure evidence
 - V3: optional soak, alerting, and backup/recovery evidence; not a completion gate
 
-Not implemented: user-initiated refunds, Event notifications/SSE, Event Outbox/DLQ, generalized reconciliation, CI, and complete OpenAPI.
+Not implemented: user-initiated refunds, Event notifications/SSE, Event Outbox/DLQ, generalized reconciliation, and complete OpenAPI.
 
 High-throughput engineering experiment (isolated Voucher/Outbox/RabbitMQ write path, including the failed cold-start round, limitations, and raw evidence): [1,500 RPS experiment record](docs/verification/CONCURRENCY-EXPERIMENT-1500-RPS-2026-09-18.md). It is not an Event performance result, production SLA, or long-run stability claim.
 
@@ -197,4 +198,3 @@ High-throughput engineering experiment (isolated Voucher/Outbox/RabbitMQ write p
 - [Order, payment, and refund state machines](docs/architecture/STATE-MACHINES.md)
 - [API contract](docs/architecture/API-CONTRACT.md)
 - [Payment boundary design](docs/architecture/PAYMENT-BOUNDARY-DESIGN.md)
-- [Engineering asset register](docs/verification/REFACTORING-STAGE-A-ASSET-REGISTER.md)
