@@ -135,14 +135,14 @@ mvn -Pinfrastructure verify
 
 ### V1 demo
 
-Start the application with the `local` profile and include the demo ADMIN identity in `ADMIN_USER_IDS`, or pass an authenticated, allowlisted `DEMO_ADMIN_TOKEN`. The script creates a fresh Event, Session, and one TicketTier and does not rely on historical business IDs:
+Start the application with the `local` profile and include the demo ADMIN identity in `ADMIN_USER_IDS`, or pass an authenticated, allowlisted `DEMO_ADMIN_TOKEN`. The script creates a fresh Event, Session, and three independent TicketTiers without relying on historical business IDs. Use a 30-second payment window to demonstrate expiry:
 
 ```bash
-mvn -Dspring-boot.run.profiles=local spring-boot:run
+EVENT_ORDER_PAYMENT_WINDOW_SECONDS=30 mvn -Dspring-boot.run.profiles=local spring-boot:run
 bash scripts/demo-v1.sh
 ```
 
-The demo deliberately covers only the reliable happy path: login, dynamic catalog setup and publication, public reads, idempotent order creation and reads, reserved inventory, normal payment, and final order/payment/inventory state. The existing callable collection remains at [`postman/collections/Event-V1.postman_collection.json`](postman/collections/Event-V1.postman_collection.json).
+The demo covers login, dynamic catalog setup and publication, public reads, idempotent order and payment replay, ownership denial, user cancellation, expiry closure, and final order/payment state and inventory conservation across three tiers. The existing callable collection remains at [`postman/collections/Event-V1.postman_collection.json`](postman/collections/Event-V1.postman_collection.json).
 
 The Event order baseline uses an isolated Event/TicketTier and Redis sessions. Independent authenticated users concurrently call `POST /api/v1/orders`; the runner records successes, business conflicts, technical failures, and P50/P95/P99, then audits inventory conservation and duplicate effective orders/reservations:
 

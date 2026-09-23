@@ -135,14 +135,14 @@ mvn -Pinfrastructure verify
 
 ### V1 Demo
 
-以 `local` profile 启动应用，且让 `ADMIN_USER_IDS` 包含演示 ADMIN 身份；也可传入已登录且已加入 allowlist 的 `DEMO_ADMIN_TOKEN`。脚本动态创建 Event、Session 和一个 TicketTier，不依赖历史业务 ID：
+以 `local` profile 启动应用，且让 `ADMIN_USER_IDS` 包含演示 ADMIN 身份；也可传入已登录且已加入 allowlist 的 `DEMO_ADMIN_TOKEN`。脚本动态创建 Event、Session 和三个独立 TicketTier，不依赖历史业务 ID。演示超时关单时，以 30 秒支付窗口启动应用：
 
 ```bash
-mvn -Dspring-boot.run.profiles=local spring-boot:run
+EVENT_ORDER_PAYMENT_WINDOW_SECONDS=30 mvn -Dspring-boot.run.profiles=local spring-boot:run
 bash scripts/demo-v1.sh
 ```
 
-Demo 只覆盖稳定 Happy Path：登录、动态建档与发布、公开查询、幂等下单与查询、预留库存、正常支付及最终订单/支付/库存状态。已有 Event 请求集合仍位于 [`postman/collections/Event-V1.postman_collection.json`](postman/collections/Event-V1.postman_collection.json)。
+Demo 覆盖登录、动态建档与发布、公开查询、幂等下单与支付、越权读取拒绝、用户取消、超时关单，以及最终订单、支付和三档库存守恒。已有 Event 请求集合仍位于 [`postman/collections/Event-V1.postman_collection.json`](postman/collections/Event-V1.postman_collection.json)。
 
 Event 下单基线使用隔离 Event/TicketTier 和 Redis 会话，由独立认证用户并发调用 `POST /api/v1/orders`，记录成功、业务冲突、技术失败及 P50/P95/P99，并在结束时审计库存守恒和异常重复订单/预留：
 

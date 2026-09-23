@@ -27,11 +27,22 @@ mvn -Pinfrastructure verify
 With MySQL and Redis running, start the application under the `local` profile with an allowlisted administrator:
 
 ```bash
-mvn -Dspring-boot.run.profiles=local spring-boot:run
+EVENT_ORDER_PAYMENT_WINDOW_SECONDS=30 mvn -Dspring-boot.run.profiles=local spring-boot:run
 bash scripts/demo-v1.sh
 ```
 
-The script creates a fresh Event, Session, and one-ticket tier. It then proves public catalog reads, authenticated order creation, same-key order replay, `PENDING_PAYMENT` plus reserved inventory, successful payment, same-key payment replay, and the final `PAID / SUCCEEDED / allocated=1` state. Every request and invariant is checked; the script stops at the first mismatch. It does not depend on fixed historical business IDs.
+The script creates a fresh Event, Session, and three one-ticket tiers for independent payment, cancellation, and expiry paths. It checks public catalog reads, authenticated order and payment replay, ownership isolation, `PAID` and `CLOSED` terminal states, close reasons, and final inventory conservation (`capacity=3`, `available=2`, `reserved=0`, `allocated=1`). The 30-second payment window is for this local demonstration; the script polls expiry for up to 45 seconds and fails if the running application uses a longer window. It does not depend on historical business IDs.
+
+
+## 2026-09-23 demo scope restoration
+
+The current candidate starts from `5337650cb52911c1a11f17caf89a3d287dfccbc3` and restores cancellation and expiry to `scripts/demo-v1.sh`; the 2026-09-19 automated test and load figures above are historical evidence for the earlier candidate, not new runs.
+
+- IntelliJ IDEA 2026.1.3 started the Java 21.0.7 application under the `local` profile with `EVENT_ORDER_PAYMENT_WINDOW_SECONDS=30` and an allowlisted local administrator. Existing MySQL 8.4 and Redis 7.4 Compose containers were started without recreating volumes.
+- `bash -n scripts/demo-v1.sh` and `git diff --check` passed. `bash scripts/demo-v1.sh` exited 0 against the live application after all nine steps. The demo used a fresh Event `2102705838023880706` and three one-ticket tiers.
+- HTTP final states: one `PAID` order and `SUCCEEDED` payment for 8800 CNY fen; two `CLOSED` orders with `USER_CANCELED` and `PAYMENT_EXPIRED`. Ownership denial and order/payment replay checks passed.
+- Read-only MySQL audit for that Event: three orders in those states; reservation states were one `CONFIRMED` and two `RELEASED`; ticket totals were `capacity=3`, `available=2`, `reserved=0`, `allocated=1`; the paid order had one `SUCCEEDED` payment for 8800 fen.
+- This was a bounded local HTTP demonstration. The Java test suites and order load baseline were not rerun for this shell/documentation-only change.
 
 ## Event order creation baseline
 
