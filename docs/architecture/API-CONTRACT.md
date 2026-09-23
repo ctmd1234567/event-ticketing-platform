@@ -2,7 +2,7 @@
 
 Updated: 2026-09-23
 
-This document describes the implemented V1 HTTP surface and the added V2 item 8 notification read endpoint. User-created refunds, Event Outbox operations, DLQ/redrive, and general reconciliation are planned work and are not current endpoints.
+This document describes the implemented V1 HTTP surface and V2 notification read and admin redrive endpoints. User-created refunds and general reconciliation remain planned work.
 
 ## Conventions
 
@@ -120,8 +120,11 @@ The server verifies freshness, HMAC-SHA256, provider result identifiers, busines
 - `GET /api/v1/admin/payment-recovery?limit=50&afterId=0`
 - `POST /api/v1/admin/payments/{paymentId}/retry`
 - `POST /api/v1/admin/refunds/{refundId}/retry`
+- `POST /api/v1/admin/notifications/{eventId}/redrive` — JSON body `{"reason":"..."}`; requires ADMIN, an existing original Event Outbox row, and no completed notification. `MANUAL_REQUIRED` Outbox events are reactivated; a `PUBLISHED` event with a missing effect is republished using its original eventId. The response includes an operation ID and `PENDING` or `CONFIRMED`. `CONFIRMED` is a broker publish result, not proof of a committed notification.
 
 Retry mutations require `Idempotency-Key` and a nonblank reason of at most 255 characters. They query/reuse the original business number; an operator cannot manually mark a payment or refund successful.
+
+Notification redrive requires a nonblank reason of at most 255 characters and records the actor, action, outcome, and original eventId in `et_notification_redrive`. It does not use the payment/refund `Idempotency-Key` header. Operators inspect `et_outbox_event`, `et_notification_failure`, the RabbitMQ DLQ, and `et_notification` before redrive; duplicate delivery is deduplicated by `et_notification.event_id`.
 
 ## HTTP status behavior
 

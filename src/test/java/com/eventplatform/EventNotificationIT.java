@@ -5,6 +5,7 @@ import com.eventplatform.notification.EventNotificationConsumer;
 import com.eventplatform.notification.EventNotificationPublisher;
 import com.eventplatform.notification.EventNotificationQueueConfig;
 import com.eventplatform.notification.EventNotificationService;
+import com.eventplatform.notification.EventNotificationRedriveService;
 import com.eventplatform.order.EventOrderService;
 import com.eventplatform.payment.EventPaymentService;
 import org.junit.jupiter.api.Test;
@@ -21,6 +22,7 @@ import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -31,6 +33,9 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.HexFormat;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -74,12 +79,14 @@ class EventNotificationIT {
     }
 
     @Autowired JdbcTemplate db;
+    @Autowired TransactionTemplate transactions;
     @Autowired EventCatalogService catalog;
     @Autowired EventOrderService orders;
     @Autowired EventPaymentService payments;
     @Autowired EventNotificationPublisher publisher;
     @Autowired EventNotificationConsumer consumer;
     @Autowired EventNotificationService notifications;
+    @Autowired EventNotificationRedriveService redrive;
     @Autowired RabbitTemplate rabbitTemplate;
     @Autowired AmqpAdmin admin;
     @Autowired DirectExchange eventNotificationExchange;
@@ -262,6 +269,274 @@ class EventNotificationIT {
                 Integer.class, firstEvent)).isEqualTo(1);
         assertThat(db.queryForObject("SELECT attempts FROM et_outbox_event WHERE event_id=?",
                 Integer.class, secondEvent)).isEqualTo(1);
+    }
+
+    @Test
+    void brokerStoppedForOneHundredEventsThenRecoveredWithinBudget() throws Exception {
+        Instant now = Instant.now();
+        long event = catalog.createEvent(1, "Broker outage acceptance", null, "Test venue");
+        long session = catalog.addSession(event, "Main", now.plusSeconds(7200), now.plusSeconds(10800),
+                now.minusSeconds(60), now.plusSeconds(3600));
+        long tier = catalog.addTicketTier(session, "Standard", 4750, "CNY", 100);
+        catalog.publish(event);
+        List<String> ids = new ArrayList<>();
+        assertThat(rabbit.execInContainer("rabbitmqctl", "stop_app").getExitCode()).isZero();
+        try {
+            for (int i = 0; i < 100; i++) {
+                var order = orders.create(8100 + i, "broker-down-" + UUID.randomUUID(), tier, 1);
+                orders.cancel(order.id(), 8100 + i);
+                ids.add("ORDER_CLOSED:" + order.id());
+            }
+            assertThat(db.queryForObject("SELECT COUNT(*) FROM et_outbox_event WHERE event_id IN ("
+                    + String.join(",", java.util.Collections.nCopies(ids.size(), "?")) + ")",
+                    Integer.class, ids.toArray())).isEqualTo(100);
+            assertThat(db.queryForObject("SELECT COUNT(*) FROM et_notification WHERE event_id IN ("
+                    + String.join(",", java.util.Collections.nCopies(ids.size(), "?")) + ")",
+                    Integer.class, ids.toArray())).isZero();
+            publisher.publish();
+        } finally {
+            assertThat(rabbit.execInContainer("rabbitmqctl", "start_app").getExitCode()).isZero();
+        }
+        await().atMost(Duration.ofSeconds(120)).pollInterval(Duration.ofSeconds(1)).untilAsserted(() -> {
+            publisher.publish();
+            String placeholders = String.join(",", java.util.Collections.nCopies(ids.size(), "?"));
+            assertThat(db.queryForObject("SELECT COUNT(*) FROM et_outbox_event WHERE publish_status='PUBLISHED'"
+                    + " AND event_id IN (" + placeholders + ")", Integer.class, ids.toArray())).isEqualTo(100);
+            assertThat(db.queryForObject("SELECT COUNT(*) FROM et_notification WHERE event_id IN ("
+                    + placeholders + ")", Integer.class, ids.toArray())).isEqualTo(100);
+        });
+        assertThat(db.queryForObject("SELECT COUNT(DISTINCT event_id) FROM et_notification WHERE event_id IN ("
+                + String.join(",", java.util.Collections.nCopies(ids.size(), "?")) + ")",
+                Integer.class, ids.toArray())).isEqualTo(100);
+    }
+
+    @Test
+    void poisonMessageIsIsolatedAndAdminRedriveKeepsOriginalEventId() {
+        var order = orders.create(76, "notification-poison-" + UUID.randomUUID(), tier(), 1);
+        orders.cancel(order.id(), 76);
+        String eventId = "ORDER_CLOSED:" + order.id();
+        String original = db.queryForObject("SELECT payload FROM et_outbox_event WHERE event_id=?",
+                String.class, eventId);
+        db.update("UPDATE et_outbox_event SET payload=? WHERE event_id=?",
+                "{\"orderId\":0,\"userId\":76}", eventId);
+        publisher.publish();
+        await().atMost(Duration.ofSeconds(30)).untilAsserted(() -> {
+            assertThat(db.queryForList("SELECT failure_kind FROM et_notification_failure WHERE event_id=?",
+                    String.class, eventId)).containsExactly("UNPROCESSABLE");
+            assertThat(admin.getQueueInfo(EventNotificationQueueConfig.DLQ).getMessageCount()).isGreaterThanOrEqualTo(1);
+        });
+        assertThat(db.queryForMap("SELECT failure_reason,failure_count,status,original_body"
+                + " FROM et_notification_failure WHERE event_id=?", eventId))
+                .containsEntry("failure_count", 1).containsEntry("status", "FAILED");
+        assertThat(db.queryForObject("SELECT COUNT(*) FROM et_notification WHERE event_id=?",
+                Integer.class, eventId)).isZero();
+        db.update("UPDATE et_outbox_event SET payload=? WHERE event_id=?", original, eventId);
+        var result = redrive.redrive(eventId, 9001, "Corrected payload");
+        assertThat(result.eventId()).isEqualTo(eventId);
+        assertThat(result.outcome()).isEqualTo("CONFIRMED");
+        await().atMost(Duration.ofSeconds(15)).untilAsserted(() -> assertThat(db.queryForObject(
+                "SELECT COUNT(*) FROM et_notification WHERE event_id=?", Integer.class, eventId)).isEqualTo(1));
+        assertThat(db.queryForMap("SELECT event_id,actor_id,reason,action,outcome FROM et_notification_redrive WHERE id=?",
+                result.operationId())).containsEntry("event_id", eventId)
+                .containsEntry("actor_id", 9001L).containsEntry("action", "REDRIVE_CONSUMER")
+                .containsEntry("outcome", "CONFIRMED");
+    }
+
+    @Test
+    void consumerRollbackAndLostAckRedeliveryHaveOneEffect() throws Exception {
+        var order = orders.create(77, "notification-consumer-crash-" + UUID.randomUUID(), tier(), 1);
+        orders.cancel(order.id(), 77);
+        String eventId = "ORDER_CLOSED:" + order.id();
+        // A process dying before commit rolls back the notification write.
+        assertThatThrownBy(() -> transactions.executeWithoutResult(status -> {
+            try {
+                consumer.receive(eventId);
+            } catch (Exception failure) {
+                throw new IllegalStateException(failure);
+            }
+            throw new IllegalStateException("injected crash before commit");
+        })).hasMessageContaining("injected crash before commit");
+        assertThat(db.queryForObject("SELECT COUNT(*) FROM et_notification WHERE event_id=?",
+                Integer.class, eventId)).isZero();
+
+        rabbitTemplate.convertAndSend(EventNotificationQueueConfig.EXCHANGE,
+                EventNotificationQueueConfig.ROUTING_KEY, eventId);
+        await().atMost(Duration.ofSeconds(15)).untilAsserted(() -> assertThat(db.queryForObject(
+                "SELECT COUNT(*) FROM et_notification WHERE event_id=?", Integer.class, eventId)).isEqualTo(1));
+
+        // Exercise the duplicate handler synchronously, so the assertion cannot
+        // pass before the duplicate is actually processed.
+        consumer.receive(eventId);
+        assertThat(db.queryForObject("SELECT COUNT(*) FROM et_notification WHERE event_id=?",
+                Integer.class, eventId)).isEqualTo(1);
+        // A second Broker delivery is also allowed; its arrival is asynchronous.
+        rabbitTemplate.convertAndSend(EventNotificationQueueConfig.EXCHANGE,
+                EventNotificationQueueConfig.ROUTING_KEY, eventId);
+        await().atMost(Duration.ofSeconds(5)).untilAsserted(() -> assertThat(db.queryForObject(
+                "SELECT COUNT(*) FROM et_notification WHERE event_id=?", Integer.class, eventId)).isEqualTo(1));
+    }
+
+    @Test
+    void distinctOversizedPoisonBodiesKeepSeparateFailureRecords() throws Exception {
+        String prefix = "malformed:" + "x".repeat(80);
+        byte[] first = (prefix + ":first").getBytes(StandardCharsets.UTF_8);
+        byte[] second = (prefix + ":second").getBytes(StandardCharsets.UTF_8);
+        String firstId = "INVALID_SHA256:" + HexFormat.of().formatHex(
+                MessageDigest.getInstance("SHA-256").digest(first)).substring(0, 48);
+        String secondId = "INVALID_SHA256:" + HexFormat.of().formatHex(
+                MessageDigest.getInstance("SHA-256").digest(second)).substring(0, 48);
+        assertThat(firstId).isNotEqualTo(secondId);
+
+        rabbitTemplate.convertAndSend(EventNotificationQueueConfig.EXCHANGE,
+                EventNotificationQueueConfig.ROUTING_KEY, first);
+        rabbitTemplate.convertAndSend(EventNotificationQueueConfig.EXCHANGE,
+                EventNotificationQueueConfig.ROUTING_KEY, second);
+        await().atMost(Duration.ofSeconds(15)).untilAsserted(() -> {
+            assertThat(db.queryForObject("SELECT COUNT(*) FROM et_notification_failure"
+                    + " WHERE event_id IN (?,?) AND failure_kind='UNPROCESSABLE'",
+                    Integer.class, firstId, secondId)).isEqualTo(2);
+            assertThat(db.queryForObject("SELECT original_body FROM et_notification_failure WHERE event_id=?",
+                    byte[].class, firstId)).isEqualTo(first);
+            assertThat(db.queryForObject("SELECT original_body FROM et_notification_failure WHERE event_id=?",
+                    byte[].class, secondId)).isEqualTo(second);
+        });
+    }
+
+    @Test
+    void technicalConsumerFailureStopsAfterBoundedRetryAndCanBeRedriven() {
+        var order = orders.create(80, "notification-technical-" + UUID.randomUUID(), tier(), 1);
+        orders.cancel(order.id(), 80);
+        String eventId = "ORDER_CLOSED:" + order.id();
+        // A conflicting stored row makes the insert fail with a technical
+        // uniqueness error; the mismatch must not be mistaken for idempotency.
+        db.update("""
+                INSERT INTO et_notification(id,event_id,user_id,order_id,notification_type,content)
+                VALUES (?,?,?,?,?,?)
+                """, com.baomidou.mybatisplus.core.toolkit.IdWorker.getId(), eventId,
+                999999, order.id(), "ORDER_CLOSED", "conflicting fixture");
+        try {
+            publisher.publish();
+            await().atMost(Duration.ofSeconds(30)).untilAsserted(() -> {
+                assertThat(db.queryForList("SELECT failure_kind FROM et_notification_failure WHERE event_id=?",
+                        String.class, eventId)).containsExactly("TECHNICAL");
+                assertThat(admin.getQueueInfo(EventNotificationQueueConfig.DLQ).getMessageCount())
+                        .isGreaterThanOrEqualTo(1);
+            });
+            assertThat(db.queryForObject("SELECT COUNT(*) FROM et_notification WHERE event_id=? AND user_id=?",
+                    Integer.class, eventId, 80)).isZero();
+        } finally {
+            db.update("DELETE FROM et_notification WHERE event_id=? AND user_id=?", eventId, 999999);
+        }
+        var result = redrive.redrive(eventId, 9001, "Storage failure removed");
+        assertThat(result.outcome()).isEqualTo("CONFIRMED");
+        await().atMost(Duration.ofSeconds(15)).untilAsserted(() -> assertThat(db.queryForObject(
+                "SELECT COUNT(*) FROM et_notification WHERE event_id=?", Integer.class, eventId)).isEqualTo(1));
+    }
+
+    @Test
+    void publishedEventWithMissingEffectCanBeAuditedAndSafelyRedriven() {
+        var order = orders.create(81, "notification-gap-" + UUID.randomUUID(), tier(), 1);
+        orders.cancel(order.id(), 81);
+        String eventId = "ORDER_CLOSED:" + order.id();
+        // Models an event accepted by the old queue before an upgrade but
+        // absent from the notification table during operator reconciliation.
+        db.update("UPDATE et_outbox_event SET publish_status='PUBLISHED' WHERE event_id=?", eventId);
+        var result = redrive.redrive(eventId, 9001, "Missing effect after queue migration");
+        assertThat(result.eventId()).isEqualTo(eventId);
+        await().atMost(Duration.ofSeconds(15)).untilAsserted(() -> assertThat(db.queryForObject(
+                "SELECT COUNT(*) FROM et_notification WHERE event_id=?", Integer.class, eventId)).isEqualTo(1));
+        assertThat(db.queryForObject("SELECT failure_kind FROM et_notification_failure WHERE event_id=?",
+                String.class, eventId)).isEqualTo("MANUAL_GAP");
+        assertThatThrownBy(() -> redrive.redrive(eventId, 9001, "Duplicate operation"))
+                .hasMessageContaining("already exists");
+    }
+
+    @Test
+    void exhaustedPublisherCanBeReactivatedWithAuditAndSameEventId() {
+        var order = orders.create(82, "notification-publisher-redrive-" + UUID.randomUUID(), tier(), 1);
+        orders.cancel(order.id(), 82);
+        String eventId = "ORDER_CLOSED:" + order.id();
+        db.update("""
+                UPDATE et_outbox_event SET publish_status='MANUAL_REQUIRED',attempts=8,
+                    last_error='broker unavailable' WHERE event_id=?
+                """, eventId);
+        var result = redrive.redrive(eventId, 9001, "Broker route repaired");
+        assertThat(result.outcome()).isEqualTo("PENDING");
+        assertThat(status(eventId)).isEqualTo("PENDING");
+        assertThat(db.queryForObject("SELECT attempts FROM et_outbox_event WHERE event_id=?",
+                Integer.class, eventId)).isZero();
+        assertThat(db.queryForMap("SELECT event_id,actor_id,action,outcome FROM et_notification_redrive WHERE id=?",
+                result.operationId())).containsEntry("event_id", eventId)
+                .containsEntry("actor_id", 9001L).containsEntry("action", "REACTIVATE_PUBLISH")
+                .containsEntry("outcome", "PENDING");
+        publisher.publish();
+        await().atMost(Duration.ofSeconds(15)).untilAsserted(() -> {
+            assertThat(status(eventId)).isEqualTo("PUBLISHED");
+            assertThat(db.queryForObject("SELECT COUNT(*) FROM et_notification WHERE event_id=?",
+                    Integer.class, eventId)).isEqualTo(1);
+        });
+    }
+
+    @Test
+    void expiredRedriveLeaseKeepsPriorOperationAsUncertain() {
+        var order = orders.create(83, "notification-redrive-lease-" + UUID.randomUUID(), tier(), 1);
+        orders.cancel(order.id(), 83);
+        String eventId = "ORDER_CLOSED:" + order.id();
+        db.update("UPDATE et_outbox_event SET publish_status='PUBLISHED' WHERE event_id=?", eventId);
+        db.update("""
+                INSERT INTO et_notification_failure
+                (event_id,original_body,failure_kind,failure_reason,status,lease_until)
+                VALUES (?,?,'TECHNICAL','injected lost operator','REDRIVING',DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 1 SECOND))
+                """, eventId, eventId.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        long oldOperation = com.baomidou.mybatisplus.core.toolkit.IdWorker.getId();
+        db.update("""
+                INSERT INTO et_notification_redrive(id,event_id,actor_id,reason,action,outcome)
+                VALUES (?,?,9001,'Previous attempt','REDRIVE_CONSUMER','STARTED')
+                """, oldOperation, eventId);
+        var result = redrive.redrive(eventId, 9002, "Recover expired lease");
+        assertThat(result.outcome()).isEqualTo("CONFIRMED");
+        assertThat(db.queryForMap("SELECT outcome,detail FROM et_notification_redrive WHERE id=?",
+                oldOperation)).containsEntry("outcome", "UNCERTAIN")
+                .containsEntry("detail", "Redrive lease expired");
+        await().atMost(Duration.ofSeconds(15)).untilAsserted(() -> assertThat(db.queryForObject(
+                "SELECT COUNT(*) FROM et_notification WHERE event_id=?", Integer.class, eventId)).isEqualTo(1));
+    }
+
+    @Test
+    void publisherCrashBeforeAndAfterConfirmRecoversTheSameEvents() {
+        for (boolean afterConfirm : List.of(false, true)) {
+            long userId = afterConfirm ? 79 : 78;
+            var order = orders.create(userId, "notification-publisher-crash-" + UUID.randomUUID(), tier(), 1);
+            orders.cancel(order.id(), userId);
+            String eventId = "ORDER_CLOSED:" + order.id();
+            db.update("UPDATE et_outbox_event SET next_attempt_at=DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 60 SECOND)"
+                    + " WHERE event_id=?", eventId);
+            EventNotificationPublisher crashing = new EventNotificationPublisher(db, rabbitTemplate, admin,
+                    eventNotificationExchange, eventNotificationQueue, eventNotificationBinding,
+                    1, 8, 30, 5) {
+                @Override
+                protected void beforeConfirm(String id) {
+                    if (!afterConfirm) throw new AssertionError("injected process loss before confirm");
+                }
+
+                @Override
+                protected void afterConfirm(String id) {
+                    if (afterConfirm) throw new AssertionError("injected process loss after confirm");
+                }
+            };
+            assertThatThrownBy(crashing::publish).isInstanceOf(AssertionError.class);
+            assertThat(status(eventId)).isEqualTo("PROCESSING");
+            db.update("UPDATE et_outbox_event SET lease_until=DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 1 SECOND)"
+                    + " WHERE event_id=?", eventId);
+            publisher.publish();
+            await().atMost(Duration.ofSeconds(15)).untilAsserted(() -> {
+                assertThat(status(eventId)).isEqualTo("PUBLISHED");
+                assertThat(db.queryForObject("SELECT COUNT(*) FROM et_notification WHERE event_id=?",
+                        Integer.class, eventId)).isEqualTo(1);
+            });
+            assertThat(db.queryForObject("SELECT attempts FROM et_outbox_event WHERE event_id=?",
+                    Integer.class, eventId)).isEqualTo(2);
+        }
     }
 
     private long tier() {

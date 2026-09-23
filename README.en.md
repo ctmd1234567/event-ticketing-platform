@@ -46,7 +46,7 @@ flowchart LR
     Security <--> Redis[(Redis 7.4)]
 ```
 
-The core Event trade remains a synchronous MySQL transaction. Item 8 adds an Event notification Outbox: payment success and order closure persist intent in the same transaction. With notifications enabled, RabbitMQ carries only this side effect and never creates core orders. The old Voucher messaging experiment remains profile-isolated.
+The core Event trade remains a synchronous MySQL transaction. Payment success and order closure persist notification intent in that transaction. RabbitMQ carries only this side effect and never creates core orders. Item 9 adds broker outage recovery, bounded consumer retry, a DLQ, and audited admin redrive. The old Voucher messaging experiment remains profile-isolated.
 
 ## Core business flow
 
@@ -179,7 +179,7 @@ src/main/java/com/eventplatform/
 ├── service/       Minimal identity service
 └── config/        Security, MyBatis, experimental Rabbit configuration
 
-src/main/resources/db/migration/   Flyway V1–V6 preserved; V7 adds Event notification tables
+src/main/resources/db/migration/   Flyway V1–V6 preserved; V7/V8 add notification and recovery tables
 src/test/                         unit, concurrency, and Testcontainers acceptance
 docs/                             architecture, state machines, API, evidence
 postman/                          Event V1 collection and local environment
@@ -191,10 +191,11 @@ loadtest/                         Event baseline and isolated historical experim
 
 - Complete now: V1 Core Trading; see the [V1 verification record](docs/verification/V1-VERIFICATION.md)
 - V2 item 8: Event Notification Outbox/MQ and in-app notifications; see the [item 8 record](docs/verification/CHECKLIST-8-EVENT-NOTIFICATIONS.md)
-- Later V2 items: DLQ/redrive, full user refunds, targeted reconciliation, and dependency-failure evidence
+- V2 item 9: broker outage recovery, notification DLQ, and audited admin redrive; see the [item 9 record](docs/verification/CHECKLIST-9-MQ-RECOVERY.md)
+- Later V2 items: full user refunds, targeted reconciliation, and dependency-failure evidence
 - V3: optional soak, alerting, and backup/recovery evidence; not a completion gate
 
-Not implemented: user-initiated refunds, SSE delivery, Event notification DLQ/redrive, generalized reconciliation, and complete OpenAPI. Authenticated users can query their latest 100 notifications with `GET /api/v1/notifications`.
+Not implemented: user-initiated refunds, SSE delivery, generalized reconciliation, and complete OpenAPI. Authenticated users can query their latest 100 notifications with `GET /api/v1/notifications`; admins can redrive after investigating the cause. A DLQ and single-node persistence are not a zero-loss guarantee.
 
 High-throughput engineering experiment (isolated Voucher/Outbox/RabbitMQ write path, including the failed cold-start round, limitations, and raw evidence): [1,500 RPS experiment record](docs/verification/CONCURRENCY-EXPERIMENT-1500-RPS-2026-09-18.md). It is not an Event performance result, production SLA, or long-run stability claim.
 

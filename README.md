@@ -46,7 +46,7 @@ flowchart LR
     Security <--> Redis[(Redis 7.4)]
 ```
 
-默认产品的交易核心仍为同步 MySQL 事务。第 8 项新增 Event 站内通知 Outbox：支付成功和订单关闭在同一事务写入事件意图；启用通知开关后，RabbitMQ 只承载通知副作用，不创建核心订单。旧 Voucher 消息实验仍由独立 profile 隔离。
+默认产品的交易核心仍为同步 MySQL 事务。支付成功和订单关闭在同一事务写入站内通知 Outbox；RabbitMQ 只承载通知副作用，不创建核心订单。第 9 项补齐停机恢复、有限消费重试、DLQ 与管理员审计重驱；旧 Voucher 消息实验仍由独立 profile 隔离。
 
 ## 核心业务闭环
 
@@ -179,7 +179,7 @@ src/main/java/com/eventplatform/
 ├── service/       最小身份服务
 └── config/        Security、MyBatis、实验 Rabbit 配置
 
-src/main/resources/db/migration/   Flyway V1～V6 不可回写；V7 新增通知表
+src/main/resources/db/migration/   Flyway V1～V6 不可回写；V7/V8 新增通知与恢复表
 src/test/                         单元、并发与 Testcontainers 验收
 docs/                             架构、状态机、API 与验证证据
 postman/                          Event V1 请求集合与本地环境
@@ -191,10 +191,11 @@ loadtest/                         Event 基线与隔离的历史工程实验
 
 - 当前完成：V1 Core Trading；证据见 [V1 验收记录](docs/verification/V1-VERIFICATION.md)
 - V2 第 8 项：Event Notification Outbox/MQ 与站内通知；实现与验收见 [第 8 项记录](docs/verification/CHECKLIST-8-EVENT-NOTIFICATIONS.md)
-- V2 后续：DLQ/redrive、用户全额退款、针对性对账和故障证据
+- V2 第 9 项：Broker 停机恢复、通知 DLQ 与管理员重驱；测试条件、迁移和限制见 [第 9 项记录](docs/verification/CHECKLIST-9-MQ-RECOVERY.md)
+- V2 后续：用户全额退款、针对性对账和故障证据
 - V3：按需要选择 Soak、告警、备份恢复等增强；不是项目完成门槛
 
-未实现：用户主动退款、SSE 推送、Event 通知 DLQ/重驱、通用对账框架和完整 OpenAPI。站内通知可由登录用户通过 `GET /api/v1/notifications` 查询最近 100 条。
+未实现：用户主动退款、SSE 推送、通用对账框架和完整 OpenAPI。站内通知可由登录用户通过 `GET /api/v1/notifications` 查询最近 100 条；管理员可在确认原因后审计重驱。DLQ 和单节点持久化不构成零丢失保证。
 
 高并发工程实验（隔离的 Voucher/Outbox/RabbitMQ 写链路，包含失败冷启动轮次、限制和原始证据）：[1500 RPS 实验记录](docs/verification/CONCURRENCY-EXPERIMENT-1500-RPS-2026-09-18.md)。该实验不代表 Event 性能、生产 SLA 或长期稳定性。
 

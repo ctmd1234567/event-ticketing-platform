@@ -87,6 +87,10 @@ public class EventNotificationPublisher {
                     admin.declareExchange(exchange);
                     admin.declareQueue(queue);
                     admin.declareBinding(binding);
+                    admin.declareQueue(new Queue(EventNotificationQueueConfig.DLQ, true));
+                    admin.declareBinding(new Binding(EventNotificationQueueConfig.DLQ,
+                            Binding.DestinationType.QUEUE, EventNotificationQueueConfig.EXCHANGE,
+                            "dead", null));
                     topologyReady = true;
                 }
                 // The business event ID remains stable; Confirm correlation identifies
@@ -98,10 +102,12 @@ public class EventNotificationPublisher {
                             message.getMessageProperties().setMessageId(id);
                             return message;
                         }, correlation);
+                beforeConfirm(id);
                 var confirm = correlation.getFuture().get(confirmTimeoutSeconds, TimeUnit.SECONDS);
                 if (!confirm.isAck() || correlation.getReturned() != null) {
                     throw new IllegalStateException("Expected notification route was not confirmed");
                 }
+                afterConfirm(id);
                 db.update("""
                         UPDATE et_outbox_event SET publish_status='PUBLISHED',published_at=CURRENT_TIMESTAMP,
                             lease_token=NULL,lease_until=NULL,last_error=NULL
@@ -114,6 +120,11 @@ public class EventNotificationPublisher {
             }
         }
     }
+
+    // Fault injection points model process loss without catching an Error in publish().
+    protected void beforeConfirm(String eventId) {}
+
+    protected void afterConfirm(String eventId) {}
 
     private void fail(String id, String token, Exception failure) {
         List<Integer> matches = db.queryForList("""

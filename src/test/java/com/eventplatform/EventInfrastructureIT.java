@@ -78,7 +78,7 @@ class EventInfrastructureIT {
     void realFlywayMySqlAndEventOrderRoundTrip() {
         assertThat(flyway.info().applied())
                 .extracting(info -> info.getVersion().getVersion())
-                .containsExactly("1", "2", "3", "4", "5", "6", "7");
+                .containsExactly("1", "2", "3", "4", "5", "6", "7", "8");
 
         new ResourceDatabasePopulator(new ClassPathResource("db/event-infrastructure-seed.sql"))
                 .execute(source);

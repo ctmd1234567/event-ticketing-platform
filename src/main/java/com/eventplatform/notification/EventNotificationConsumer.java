@@ -20,7 +20,8 @@ public class EventNotificationConsumer {
         this.json = json;
     }
 
-    @RabbitListener(queues = EventNotificationQueueConfig.QUEUE)
+    @RabbitListener(queues = EventNotificationQueueConfig.QUEUE,
+            containerFactory = "eventNotificationListenerFactory")
     @Transactional
     public void receive(String eventId) throws Exception {
         var event = db.query("""

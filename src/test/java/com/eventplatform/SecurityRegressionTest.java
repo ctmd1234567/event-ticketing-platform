@@ -2,6 +2,8 @@ package com.eventplatform;
 
 import com.eventplatform.config.SecurityConfig;
 import com.eventplatform.controller.EventNotificationController;
+import com.eventplatform.controller.EventNotificationAdminController;
+import com.eventplatform.notification.EventNotificationRedriveService;
 import com.eventplatform.notification.EventNotificationService;
 import com.eventplatform.security.TokenFilter;
 import com.eventplatform.utils.UserHolder;
@@ -33,8 +35,9 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@WebMvcTest(controllers = {SecurityRegressionTest.Probe.class, EventNotificationController.class},
-        properties = "app.security.admin-user-ids=1",
+@WebMvcTest(controllers = {SecurityRegressionTest.Probe.class, EventNotificationController.class,
+        EventNotificationAdminController.class},
+        properties = {"app.security.admin-user-ids=1", "app.event-notifications.enabled=true"},
         excludeAutoConfiguration = org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration.class)
 @Import({SecurityConfig.class, SecurityRegressionTest.Probe.class})
 class SecurityRegressionTest {
@@ -42,6 +45,8 @@ class SecurityRegressionTest {
     StringRedisTemplate redis;
     @MockitoBean
     EventNotificationService notifications;
+    @MockitoBean
+    EventNotificationRedriveService redrive;
 
     @Autowired
     MockMvc mvc;
@@ -121,6 +126,21 @@ class SecurityRegressionTest {
                         .jsonPath("$.data[0].eventId").value("ORDER_PAID:10"));
         org.mockito.Mockito.verify(notifications).list(2L);
         org.mockito.Mockito.verify(notifications, org.mockito.Mockito.never()).list(1L);
+    }
+
+    @Test
+    void notificationRedriveRequiresAdminAndRecordsActor() throws Exception {
+        String path = "/api/v1/admin/notifications/ORDER_CLOSED:10/redrive";
+        String body = "{\"reason\":\"Corrected payload\"}";
+        mvc.perform(post(path).contentType("application/json").content(body))
+                .andExpect(status().isUnauthorized());
+        mvc.perform(post(path).header("authorization", USER)
+                        .contentType("application/json").content(body))
+                .andExpect(status().isForbidden());
+        mvc.perform(post(path).header("authorization", ADMIN)
+                        .contentType("application/json").content(body))
+                .andExpect(status().isOk());
+        org.mockito.Mockito.verify(redrive).redrive("ORDER_CLOSED:10", 1L, "Corrected payload");
     }
 
     @Test
