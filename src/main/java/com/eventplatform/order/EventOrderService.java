@@ -1,6 +1,7 @@
 package com.eventplatform.order;
 
 import com.baomidou.mybatisplus.core.toolkit.IdWorker;
+import com.eventplatform.notification.EventNotificationOutbox;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -29,14 +30,17 @@ public class EventOrderService {
     private static final String PAYMENT_EXPIRED = "PAYMENT_EXPIRED";
 
     private final JdbcTemplate db;
+    private final EventNotificationOutbox notificationOutbox;
     private final TransactionTemplate transactions;
     private final Duration paymentWindow;
     private final Duration expiryFailureRetry;
 
     public EventOrderService(JdbcTemplate db, PlatformTransactionManager transactionManager,
+            EventNotificationOutbox notificationOutbox,
             @Value("${app.event-orders.payment-window-seconds:900}") long paymentWindowSeconds,
             @Value("${app.event-orders.expiry-failure-retry-seconds:30}") long expiryFailureRetrySeconds) {
         this.db = db;
+        this.notificationOutbox = notificationOutbox;
         this.transactions = new TransactionTemplate(transactionManager);
         this.paymentWindow = Duration.ofSeconds(Math.max(1, paymentWindowSeconds));
         this.expiryFailureRetry = Duration.ofSeconds(Math.max(1, expiryFailureRetrySeconds));
@@ -241,6 +245,7 @@ public class EventOrderService {
             throw new IllegalStateException("Order close did not atomically release inventory");
         }
         assertInventoryConserved(order.ticketTierId());
+        notificationOutbox.orderClosed(orderId, order.userId(), closeReason);
         return true;
     }
 

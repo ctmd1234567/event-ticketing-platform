@@ -1,8 +1,8 @@
 # API Contract
 
-Updated: 2026-09-18
+Updated: 2026-09-23
 
-This document describes the implemented V1 HTTP surface. Event notifications, user-created refunds, Event Outbox operations, DLQ/redrive, and general reconciliation are planned V2 work and are not current endpoints.
+This document describes the implemented V1 HTTP surface and the added V2 item 8 notification read endpoint. User-created refunds, Event Outbox operations, DLQ/redrive, and general reconciliation are planned work and are not current endpoints.
 
 ## Conventions
 
@@ -97,6 +97,12 @@ Create request:
 V1 has one logical payment per order. Replays reuse the same payment number. Transport timeout/reset becomes `UNKNOWN`, not `FAILED`. Refresh queries trusted provider state and may converge the local record.
 
 Refund routes expose only system-created late-payment compensation. There is no user-facing refund-create endpoint. If local closure commits first and an already initiated payment later succeeds, the result transaction keeps the order closed and creates exactly one full refund intent. Refund success never returns allocated or released inventory to sale.
+
+## Owned notifications
+
+- `GET /api/v1/notifications` — authenticated user's latest 100 in-app notifications, newest first.
+
+The response uses the normal `Result` envelope. Each item has `id`, `eventId`, `orderId`, `type`, `content`, and `createdAt`. Payment success and order closure produce notification intents; delivery is asynchronous, so an empty response immediately after the transaction is possible. This endpoint has no pagination or read-state mutation.
 
 ## Simulated callback
 

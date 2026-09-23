@@ -37,6 +37,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @SpringBootTest(properties = {
         "app.event-orders.expiry-scan-enabled=false",
         "app.payment-recovery.enabled=false",
+        "app.event-notifications.enabled=false",
         "spring.rabbitmq.port=1"
 })
 class EventInfrastructureIT {
@@ -77,7 +78,7 @@ class EventInfrastructureIT {
     void realFlywayMySqlAndEventOrderRoundTrip() {
         assertThat(flyway.info().applied())
                 .extracting(info -> info.getVersion().getVersion())
-                .containsExactly("1", "2", "3", "4", "5", "6");
+                .containsExactly("1", "2", "3", "4", "5", "6", "7");
 
         new ResourceDatabasePopulator(new ClassPathResource("db/event-infrastructure-seed.sql"))
                 .execute(source);

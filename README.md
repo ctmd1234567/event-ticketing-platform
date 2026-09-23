@@ -46,7 +46,7 @@ flowchart LR
     Security <--> Redis[(Redis 7.4)]
 ```
 
-默认产品运行时只启用 Identity/Security、Event Catalog、同步 Order/Inventory、Payment/Compensation 和恢复任务。RabbitMQ 仅用于隔离的高并发订单工程实验，不参与 Event 核心订单创建。
+默认产品的交易核心仍为同步 MySQL 事务。第 8 项新增 Event 站内通知 Outbox：支付成功和订单关闭在同一事务写入事件意图；启用通知开关后，RabbitMQ 只承载通知副作用，不创建核心订单。旧 Voucher 消息实验仍由独立 profile 隔离。
 
 ## 核心业务闭环
 
@@ -114,6 +114,10 @@ MYSQL_PASSWORD=replace-with-a-local-password
 REDIS_HOST=127.0.0.1
 REDIS_PORT=6380
 ADMIN_USER_IDS=1
+RABBITMQ_USER=event_app
+RABBITMQ_PASSWORD=replace-with-a-local-password
+RABBITMQ_PORT=5673
+EVENT_NOTIFICATIONS_ENABLED=true
 ```
 
 ### 启动与验证
@@ -125,7 +129,7 @@ mvn test
 mvn -Dspring-boot.run.profiles=local spring-boot:run
 ```
 
-默认 Compose 只启动 MySQL 与 Redis。应用地址为 `http://127.0.0.1:8081`，管理端点仅监听 `127.0.0.1:8082`。`local` profile 会返回本地验证码，禁止暴露到公网。
+默认 Compose 启动 MySQL、Redis 与持久化单节点 RabbitMQ；若暂不运行通知，可设 `EVENT_NOTIFICATIONS_ENABLED=false`，交易仍写入待发 Outbox。应用地址为 `http://127.0.0.1:8081`，管理端点仅监听 `127.0.0.1:8082`。`local` profile 会返回本地验证码，禁止暴露到公网。
 
 真实依赖集成测试使用隔离 Testcontainers，不写个人开发库：
 
@@ -167,14 +171,15 @@ RESULT_FILE=docs/verification/results/event-order-creation-baseline.md \
 ```text
 src/main/java/com/eventplatform/
 ├── catalog/       Event、Session、TicketTier
-├── controller/    Event、Order、Payment、Identity API
+├── controller/    Event、Order、Payment、Identity、Notification API
+├── notification/  Event Outbox、RabbitMQ 发布消费、站内通知查询
 ├── order/         同步订单、库存、关单；隔离的历史工程实验
 ├── payment/       网关边界、回调、UNKNOWN 恢复、补偿退款
 ├── security/      Token、验证码、权限与限流
 ├── service/       最小身份服务
 └── config/        Security、MyBatis、实验 Rabbit 配置
 
-src/main/resources/db/migration/   Flyway V1～V6（不可回写）
+src/main/resources/db/migration/   Flyway V1～V6 不可回写；V7 新增通知表
 src/test/                         单元、并发与 Testcontainers 验收
 docs/                             架构、状态机、API 与验证证据
 postman/                          Event V1 请求集合与本地环境
@@ -185,10 +190,11 @@ loadtest/                         Event 基线与隔离的历史工程实验
 ## 当前边界与路线图
 
 - 当前完成：V1 Core Trading；证据见 [V1 验收记录](docs/verification/V1-VERIFICATION.md)
-- V2：Event Notification Outbox/MQ、DLQ/redrive、用户全额退款、针对性对账和故障证据
+- V2 第 8 项：Event Notification Outbox/MQ 与站内通知；实现与验收见 [第 8 项记录](docs/verification/CHECKLIST-8-EVENT-NOTIFICATIONS.md)
+- V2 后续：DLQ/redrive、用户全额退款、针对性对账和故障证据
 - V3：按需要选择 Soak、告警、备份恢复等增强；不是项目完成门槛
 
-未实现：用户主动退款、Event 通知/SSE、Event Outbox/DLQ、通用对账框架和完整 OpenAPI。
+未实现：用户主动退款、SSE 推送、Event 通知 DLQ/重驱、通用对账框架和完整 OpenAPI。站内通知可由登录用户通过 `GET /api/v1/notifications` 查询最近 100 条。
 
 高并发工程实验（隔离的 Voucher/Outbox/RabbitMQ 写链路，包含失败冷启动轮次、限制和原始证据）：[1500 RPS 实验记录](docs/verification/CONCURRENCY-EXPERIMENT-1500-RPS-2026-09-18.md)。该实验不代表 Event 性能、生产 SLA 或长期稳定性。
 

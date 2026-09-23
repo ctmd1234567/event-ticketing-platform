@@ -2,6 +2,8 @@ package com.eventplatform;
 
 import com.eventplatform.catalog.EventCatalogService;
 import com.eventplatform.order.EventOrderService;
+import com.eventplatform.notification.EventNotificationOutbox;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
@@ -55,8 +57,15 @@ class EventOrderServiceTest {
               id BIGINT PRIMARY KEY,order_id BIGINT UNIQUE,ticket_tier_id BIGINT,quantity INT,
               status VARCHAR(16),created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)
             """);
+        db.execute("""
+            CREATE TABLE et_outbox_event(
+              event_id VARCHAR(64) PRIMARY KEY,event_type VARCHAR(32),aggregate_id BIGINT,user_id BIGINT,
+              payload VARCHAR(1000),publish_status VARCHAR(24) DEFAULT 'PENDING',
+              attempts INT DEFAULT 0,next_attempt_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)
+            """);
         catalog = new EventCatalogService(db);
-        orders = new EventOrderService(db, new DataSourceTransactionManager(source), 900, 30);
+        orders = new EventOrderService(db, new DataSourceTransactionManager(source),
+                new EventNotificationOutbox(db, new ObjectMapper()), 900, 30);
     }
 
     @Test

@@ -2,6 +2,8 @@ package com.eventplatform.payment;
 
 import com.eventplatform.catalog.EventCatalogService;
 import com.eventplatform.order.EventOrderService;
+import com.eventplatform.notification.EventNotificationOutbox;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
@@ -36,6 +38,7 @@ abstract class PaymentServiceContract {
     protected abstract DataSource source() throws Exception;
     private GateJdbc db;
     private EventOrderService orders;
+    private EventNotificationOutbox notificationOutbox;
     private EventPaymentService payments;
     private EventRefundService refunds;
     private PaymentCallbackService callbacks;
@@ -54,11 +57,12 @@ abstract class PaymentServiceContract {
         db = new GateJdbc(source);
         manager = new DataSourceTransactionManager(source);
         local = new TransactionTemplate(manager);
-        orders = new EventOrderService(db, manager, 900, 30);
+        notificationOutbox = new EventNotificationOutbox(db, new ObjectMapper());
+        orders = new EventOrderService(db, manager, notificationOutbox, 900, 30);
         faults = new GatewayResponseFaultInjector("NONE");
         gateway = spy(new JdbcSimulatedPaymentGateway(db, manager,
                 new ConfiguredSimulatedGatewayOutcomePolicy("SUCCEEDED", "SUCCEEDED"), faults));
-        payments = new EventPaymentService(db, manager, gateway);
+        payments = new EventPaymentService(db, manager, gateway, notificationOutbox);
         refunds = new EventRefundService(db, manager, gateway);
         callbacks = new PaymentCallbackService(db, manager, payments, refunds, "callback-test-secret", 300);
         catalog = new EventCatalogService(db);
@@ -556,7 +560,7 @@ abstract class PaymentServiceContract {
         var unknown = payments.create(order.id(), 7, key);
         db.update("UPDATE et_payment SET next_attempt_at=? WHERE id=?",
                 Timestamp.from(Instant.now().minusSeconds(1)), unknown.id());
-        var reconstructedPayments = new EventPaymentService(db, manager, gateway);
+        var reconstructedPayments = new EventPaymentService(db, manager, gateway, notificationOutbox);
         var reconstructedRefunds = new EventRefundService(db, manager, gateway);
         var reconstructedCallbacks = new PaymentCallbackService(db, manager, reconstructedPayments,
                 reconstructedRefunds, "callback-test-secret", 300);

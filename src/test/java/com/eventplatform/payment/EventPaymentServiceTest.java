@@ -15,7 +15,8 @@ class EventPaymentServiceTest extends PaymentServiceContract {
         var source = new DriverManagerDataSource("jdbc:h2:mem:payment_" + UUID.randomUUID()
                 + ";MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1;LOCK_TIMEOUT=5000", "sa", "");
         for (String migration : new String[]{"V3__event_catalog.sql", "V4__event_orders.sql",
-                "V5__event_order_expiry_retry.sql", "V6__event_payments.sql"}) {
+                "V5__event_order_expiry_retry.sql", "V6__event_payments.sql",
+                "V7__event_notifications.sql"}) {
             String sql = new ClassPathResource("db/migration/" + migration).getContentAsString(StandardCharsets.UTF_8)
                     .replace(" CHARACTER SET ascii COLLATE ascii_bin", "")
                     .replace(" ENGINE=InnoDB DEFAULT CHARSET=utf8mb4", "");

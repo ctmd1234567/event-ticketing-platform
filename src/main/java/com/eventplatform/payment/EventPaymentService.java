@@ -1,6 +1,7 @@
 package com.eventplatform.payment;
 
 import com.baomidou.mybatisplus.core.toolkit.IdWorker;
+import com.eventplatform.notification.EventNotificationOutbox;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.dao.EmptyResultDataAccessException;
@@ -26,14 +27,16 @@ import java.util.Objects;
 @Service
 public class EventPaymentService {
     private final JdbcTemplate db;
+    private final EventNotificationOutbox notificationOutbox;
     private final TransactionTemplate transactions;
     private final SimulatedPaymentGateway gateway;
 
     public EventPaymentService(JdbcTemplate db, PlatformTransactionManager manager,
-            SimulatedPaymentGateway gateway) {
+            SimulatedPaymentGateway gateway, EventNotificationOutbox notificationOutbox) {
         this.db = db;
         this.transactions = new TransactionTemplate(manager);
         this.gateway = gateway;
+        this.notificationOutbox = notificationOutbox;
     }
 
     public PaymentView create(long orderId, long userId, String key) {
@@ -355,6 +358,7 @@ public class EventPaymentService {
         }
         db.queryForObject("SELECT id FROM et_ticket_tier WHERE id=? FOR UPDATE", Long.class, order.tierId());
         changed(db.update("UPDATE et_order SET status='PAID' WHERE id=? AND status='PENDING_PAYMENT'", order.id()));
+        notificationOutbox.orderPaid(order.id(), order.userId());
         changed(db.update("UPDATE et_inventory_reservation SET status='CONFIRMED' WHERE order_id=? AND status='RESERVED'",
                 order.id()));
         changed(db.update("""

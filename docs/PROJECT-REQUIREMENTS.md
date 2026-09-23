@@ -30,10 +30,14 @@ Build a focused modular-monolith backend for event catalog, ticket inventory, or
 
 ## V2 — main-project completion target
 
-Planned next increments:
+Implemented in V2 item 8:
 
 - Event notification intent stored transactionally with committed business changes.
-- RabbitMQ publication with lease/retry, Confirm/Return handling, consumer idempotency, post-commit ACK, bounded retry, DLQ metadata, and safe redrive.
+- RabbitMQ publication with lease/retry, Confirm/Return handling, consumer idempotency, post-commit ACK, and bounded publisher retry. Authenticated users can read their latest 100 in-app notifications.
+
+Planned next increments:
+
+- Broker stop/recovery and consumer crash-window proof, bounded consumer failure handling, DLQ metadata, and audited safe redrive.
 - User-initiated full refunds reusing the existing payment/refund uncertainty model; no partial refunds and no inventory return after allocation.
 - Targeted reconciliation for stuck reservations, contradictory payment/refund state, long-running uncertainty, and failed notification work.
 - Evidence for critical SQL, dependency failure/recovery, Normal/Stress/Spike load, backlog age, connection pools, JVM, and error/rejection behavior.

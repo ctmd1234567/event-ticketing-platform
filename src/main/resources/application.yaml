@@ -47,6 +47,22 @@ spring:
     baseline-on-migrate: true
     baseline-version: 2
     clean-disabled: true
+  rabbitmq:
+    host: ${RABBITMQ_HOST:127.0.0.1}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USER:event_app}
+    password: ${RABBITMQ_PASSWORD:}
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    template:
+      mandatory: true
+    listener:
+      simple:
+        acknowledge-mode: auto
+        default-requeue-rejected: false
+        concurrency: 1
+        max-concurrency: 2
+        prefetch: 10
   jackson:
     default-property-inclusion: non_null
 management:
@@ -108,6 +124,14 @@ app:
       voucher-window-seconds: ${ORDER_VOUCHER_RATE_WINDOW_SECONDS:1}
       global-max: ${ORDER_GLOBAL_RATE_MAX:800}
       global-window-seconds: ${ORDER_GLOBAL_RATE_WINDOW_SECONDS:1}
+  event-notifications:
+    # Broker outage never blocks transaction commits; intents remain in MySQL.
+    enabled: ${EVENT_NOTIFICATIONS_ENABLED:true}
+    interval-ms: ${EVENT_NOTIFICATIONS_INTERVAL_MS:1000}
+    batch-size: ${EVENT_NOTIFICATIONS_BATCH_SIZE:50}
+    lease-seconds: ${EVENT_NOTIFICATIONS_LEASE_SECONDS:30}
+    max-attempts: ${EVENT_NOTIFICATIONS_MAX_ATTEMPTS:8}
+    confirm-timeout-seconds: ${EVENT_NOTIFICATIONS_CONFIRM_TIMEOUT_SECONDS:5}
   outbox:
     enabled: false
     interval-ms: ${OUTBOX_INTERVAL_MS:50}

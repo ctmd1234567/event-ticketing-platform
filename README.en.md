@@ -46,7 +46,7 @@ flowchart LR
     Security <--> Redis[(Redis 7.4)]
 ```
 
-The default product runtime contains Identity/Security, Event Catalog, synchronous Order/Inventory, Payment/Compensation, and recovery jobs. RabbitMQ is used only by the isolated concurrency experiment and does not create core Event orders.
+The core Event trade remains a synchronous MySQL transaction. Item 8 adds an Event notification Outbox: payment success and order closure persist intent in the same transaction. With notifications enabled, RabbitMQ carries only this side effect and never creates core orders. The old Voucher messaging experiment remains profile-isolated.
 
 ## Core business flow
 
@@ -114,6 +114,10 @@ MYSQL_PASSWORD=replace-with-a-local-password
 REDIS_HOST=127.0.0.1
 REDIS_PORT=6380
 ADMIN_USER_IDS=1
+RABBITMQ_USER=event_app
+RABBITMQ_PASSWORD=replace-with-a-local-password
+RABBITMQ_PORT=5673
+EVENT_NOTIFICATIONS_ENABLED=true
 ```
 
 ### Start and verify
@@ -125,7 +129,7 @@ mvn test
 mvn -Dspring-boot.run.profiles=local spring-boot:run
 ```
 
-Default Compose starts only MySQL and Redis. The app listens on `http://127.0.0.1:8081`; management endpoints bind to `127.0.0.1:8082`. The `local` profile exposes local verification codes and must never be internet-facing.
+Default Compose starts MySQL, Redis, and one persistent RabbitMQ node. Set `EVENT_NOTIFICATIONS_ENABLED=false` to run without the broker; trades still persist pending Outbox intent. The app listens on `http://127.0.0.1:8081`; management endpoints bind to `127.0.0.1:8082`. The `local` profile exposes local verification codes and must never be internet-facing.
 
 Real-dependency integration tests use isolated Testcontainers and do not write to a personal development database:
 
@@ -167,14 +171,15 @@ The [API contract](docs/architecture/API-CONTRACT.md) is the source of truth for
 ```text
 src/main/java/com/eventplatform/
 ├── catalog/       Event, Session, TicketTier
-├── controller/    Event, Order, Payment, Identity APIs
+├── controller/    Event, Order, Payment, Identity, Notification APIs
+├── notification/  Event Outbox, RabbitMQ publisher/consumer, in-app reads
 ├── order/         Synchronous ordering and expiry; isolated historical experiment
 ├── payment/       Gateway boundary, callbacks, UNKNOWN recovery, compensation
 ├── security/      Tokens, codes, authorization, rate limiting
 ├── service/       Minimal identity service
 └── config/        Security, MyBatis, experimental Rabbit configuration
 
-src/main/resources/db/migration/   immutable Flyway V1–V6
+src/main/resources/db/migration/   Flyway V1–V6 preserved; V7 adds Event notification tables
 src/test/                         unit, concurrency, and Testcontainers acceptance
 docs/                             architecture, state machines, API, evidence
 postman/                          Event V1 collection and local environment
@@ -185,10 +190,11 @@ loadtest/                         Event baseline and isolated historical experim
 ## Current boundary and roadmap
 
 - Complete now: V1 Core Trading; see the [V1 verification record](docs/verification/V1-VERIFICATION.md)
-- V2: Event Notification Outbox/MQ, DLQ/redrive, full user refunds, targeted reconciliation, and dependency-failure evidence
+- V2 item 8: Event Notification Outbox/MQ and in-app notifications; see the [item 8 record](docs/verification/CHECKLIST-8-EVENT-NOTIFICATIONS.md)
+- Later V2 items: DLQ/redrive, full user refunds, targeted reconciliation, and dependency-failure evidence
 - V3: optional soak, alerting, and backup/recovery evidence; not a completion gate
 
-Not implemented: user-initiated refunds, Event notifications/SSE, Event Outbox/DLQ, generalized reconciliation, and complete OpenAPI.
+Not implemented: user-initiated refunds, SSE delivery, Event notification DLQ/redrive, generalized reconciliation, and complete OpenAPI. Authenticated users can query their latest 100 notifications with `GET /api/v1/notifications`.
 
 High-throughput engineering experiment (isolated Voucher/Outbox/RabbitMQ write path, including the failed cold-start round, limitations, and raw evidence): [1,500 RPS experiment record](docs/verification/CONCURRENCY-EXPERIMENT-1500-RPS-2026-09-18.md). It is not an Event performance result, production SLA, or long-run stability claim.
 

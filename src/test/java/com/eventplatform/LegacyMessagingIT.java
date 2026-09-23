@@ -28,7 +28,8 @@ import static org.awaitility.Awaitility.await;
 @ActiveProfiles({"local", "legacy-experiment"})
 @SpringBootTest(properties = {
         "app.event-orders.expiry-scan-enabled=false",
-        "app.payment-recovery.enabled=false"
+        "app.payment-recovery.enabled=false",
+        "app.event-notifications.enabled=false"
 })
 class LegacyMessagingIT {
     @Container

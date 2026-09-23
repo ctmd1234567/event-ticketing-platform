@@ -1,6 +1,8 @@
 package com.eventplatform;
 
 import com.eventplatform.config.SecurityConfig;
+import com.eventplatform.controller.EventNotificationController;
+import com.eventplatform.notification.EventNotificationService;
 import com.eventplatform.security.TokenFilter;
 import com.eventplatform.utils.UserHolder;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -31,13 +33,15 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@WebMvcTest(controllers = SecurityRegressionTest.Probe.class,
+@WebMvcTest(controllers = {SecurityRegressionTest.Probe.class, EventNotificationController.class},
         properties = "app.security.admin-user-ids=1",
         excludeAutoConfiguration = org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration.class)
 @Import({SecurityConfig.class, SecurityRegressionTest.Probe.class})
 class SecurityRegressionTest {
     @MockitoBean
     StringRedisTemplate redis;
+    @MockitoBean
+    EventNotificationService notifications;
 
     @Autowired
     MockMvc mvc;
@@ -104,6 +108,19 @@ class SecurityRegressionTest {
         mvc.perform(get("/user/me")).andExpect(status().isUnauthorized());
         mvc.perform(get("/user/me").header("authorization", "c".repeat(32)))
                 .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void notificationRouteRequiresIdentityAndUsesItsOwnerScope() throws Exception {
+        when(notifications.list(2L)).thenReturn(List.of(new EventNotificationService.NotificationView(
+                1L, "ORDER_PAID:10", 10L, "ORDER_PAID", "Paid", java.time.Instant.now())));
+        mvc.perform(get("/api/v1/notifications")).andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/v1/notifications").header("authorization", USER))
+                .andExpect(status().isOk())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
+                        .jsonPath("$.data[0].eventId").value("ORDER_PAID:10"));
+        org.mockito.Mockito.verify(notifications).list(2L);
+        org.mockito.Mockito.verify(notifications, org.mockito.Mockito.never()).list(1L);
     }
 
     @Test
