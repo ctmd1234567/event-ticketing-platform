@@ -452,6 +452,35 @@ class EventNotificationIT {
     }
 
     @Test
+    void confirmedRedriveWithoutEffectCanBeAuditedAndTriedAgain() {
+        var order = orders.create(84, "notification-redrive-gap-" + UUID.randomUUID(), tier(), 1);
+        orders.cancel(order.id(), 84);
+        String eventId = "ORDER_CLOSED:" + order.id();
+        db.update("UPDATE et_outbox_event SET publish_status='PUBLISHED' WHERE event_id=?", eventId);
+        db.update("""
+                INSERT INTO et_notification_failure
+                (event_id,original_body,failure_kind,failure_reason,status)
+                VALUES (?,?,'MANUAL_GAP','Prior broker confirm had no effect','REDRIVEN')
+                """, eventId, eventId.getBytes(StandardCharsets.UTF_8));
+        long priorOperation = com.baomidou.mybatisplus.core.toolkit.IdWorker.getId();
+        db.update("""
+                INSERT INTO et_notification_redrive(id,event_id,actor_id,reason,action,outcome)
+                VALUES (?,?,9001,'First broker confirm','REDRIVE_CONSUMER','CONFIRMED')
+                """, priorOperation, eventId);
+
+        var result = redrive.redrive(eventId, 9002, "No notification after previous confirm");
+        assertThat(result.outcome()).isEqualTo("CONFIRMED");
+        assertThat(result.operationId()).isNotEqualTo(priorOperation);
+        await().atMost(Duration.ofSeconds(15)).untilAsserted(() -> assertThat(db.queryForObject(
+                "SELECT COUNT(*) FROM et_notification WHERE event_id=?", Integer.class, eventId)).isEqualTo(1));
+        assertThat(db.queryForMap("SELECT actor_id,reason,action,outcome FROM et_notification_redrive WHERE id=?",
+                result.operationId())).containsEntry("actor_id", 9002L)
+                .containsEntry("action", "REDRIVE_CONSUMER").containsEntry("outcome", "CONFIRMED");
+        assertThat(db.queryForObject("SELECT outcome FROM et_notification_redrive WHERE id=?",
+                String.class, priorOperation)).isEqualTo("CONFIRMED");
+    }
+
+    @Test
     void exhaustedPublisherCanBeReactivatedWithAuditAndSameEventId() {
         var order = orders.create(82, "notification-publisher-redrive-" + UUID.randomUUID(), tier(), 1);
         orders.cancel(order.id(), 82);
