@@ -446,7 +446,10 @@ abstract class PaymentServiceContract {
         long refundId = db.queryForObject("SELECT id FROM et_refund WHERE payment_id=?", Long.class, late.id());
         db.update("UPDATE et_refund SET attempts=5,next_attempt_at=? WHERE id=?",
                 Timestamp.from(Instant.now().minusSeconds(1)), refundId);
-        assertThat(refunds.claimDueRecoveries(100)).isEmpty();
+        // The shared integration database can contain due refunds from other
+        // tests; only this refund must be excluded after its attempt limit.
+        assertThat(refunds.claimDueRecoveries(100))
+                .noneMatch(candidate -> candidate.refundId() == refundId);
         var manual = refunds.refund(refundId, 7);
         assertThat(manual.status()).isEqualTo("REQUESTED");
         assertThat(manual.recoveryStatus()).isEqualTo("MANUAL_REQUIRED");
@@ -550,8 +553,11 @@ abstract class PaymentServiceContract {
         // This direct row setup isolates the bounded-handoff transition; it deliberately does not invoke result application.
         db.update("UPDATE et_payment SET status='UNKNOWN',recovery_status='AUTO',attempts=5,next_attempt_at=? WHERE id=?",
                 Timestamp.from(Instant.now().minusSeconds(1)), unknown.id());
-        assertThat(payments.claimDueRecoveries(100)).isEmpty();
+        // Other tests can leave due payments in the same integration database.
+        assertThat(payments.claimDueRecoveries(100))
+                .noneMatch(candidate -> candidate.paymentId() == unknown.id());
         assertThat(payments.payment(unknown.id(), 7).recoveryStatus()).isEqualTo("MANUAL_REQUIRED");
+        assertThat(payments.payment(unknown.id(), 7).lastError()).isEqualTo("RECOVERY_ATTEMPTS_EXHAUSTED");
     }
 
     @Test

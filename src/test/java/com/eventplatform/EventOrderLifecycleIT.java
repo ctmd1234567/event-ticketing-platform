@@ -162,6 +162,7 @@ class EventOrderLifecycleIT {
                         "--app.event-orders.expiry-scan-interval-ms=1000",
                         "--app.event-orders.expiry-scan-batch-size=100",
                         "--app.event-orders.expiry-scan-enabled=" + expiryScanEnabled,
+                        "--app.event-notifications.enabled=false",
                         "--logging.level.com.eventplatform=INFO");
     }
 
