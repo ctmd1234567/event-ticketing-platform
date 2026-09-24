@@ -46,7 +46,7 @@ flowchart LR
     Security <--> Redis[(Redis 7.4)]
 ```
 
-The core Event trade remains a synchronous MySQL transaction. Payment success and order closure persist notification intent in that transaction. RabbitMQ carries only this side effect and never creates core orders. Item 9 adds broker outage recovery, bounded consumer retry, a DLQ, and audited admin redrive. The old Voucher messaging experiment remains profile-isolated.
+The core Event trade remains a synchronous MySQL transaction. Payment success and order closure persist notification intent in that transaction. RabbitMQ carries only this side effect and never creates core orders. Item 9 adds broker outage recovery, bounded consumer retry, a DLQ, and audited admin redrive. The old Voucher messaging experiment has been archived under item 12 and is no longer a runtime path.
 
 ## Core business flow
 
@@ -189,16 +189,17 @@ loadtest/                         Event baseline and isolated historical experim
 
 ## Current boundary and roadmap
 
-- Complete now: V1 Core Trading; see the [V1 verification record](docs/verification/V1-VERIFICATION.md)
+- Complete locally: V1 Core Trading and V2 items 8–12. The candidate has not been pushed, so remote CI has not run. See the [V1 verification record](docs/verification/V1-VERIFICATION.md)
 - V2 item 8: Event Notification Outbox/MQ and in-app notifications; see the [item 8 record](docs/verification/CHECKLIST-8-EVENT-NOTIFICATIONS.md)
 - V2 item 9: broker outage recovery, notification DLQ, and audited admin redrive; see the [item 9 record](docs/verification/CHECKLIST-9-MQ-RECOVERY.md)
 - V2 item 10: full user refunds and targeted reconciliation; see the [item 10 record](docs/verification/CHECKLIST-10-REFUND-RECONCILIATION.md)
-- Later V2 items: SQL, load, and dependency-failure evidence
+- V2 item 11: [Event SQL, load, Redis outage, and process recovery evidence](docs/verification/CHECKLIST-11-EVENT-EVIDENCE.md)
+- V2 item 12: [engineering acceptance record](docs/verification/CHECKLIST-12-V2-ACCEPTANCE.md) and [legacy experiment archive](docs/history/LEGACY-VOUCHER-ARCHIVE.md)
 - V3: optional soak, alerting, and backup/recovery evidence; not a completion gate
 
 Not implemented: SSE delivery, generalized reconciliation, and complete OpenAPI. Authenticated users can query their latest 100 notifications with `GET /api/v1/notifications`; admins can redrive after investigating the cause. A DLQ and single-node persistence are not a zero-loss guarantee.
 
-High-throughput engineering experiment (isolated Voucher/Outbox/RabbitMQ write path, including the failed cold-start round, limitations, and raw evidence): [1,500 RPS experiment record](docs/verification/CONCURRENCY-EXPERIMENT-1500-RPS-2026-09-18.md). It is not an Event performance result, production SLA, or long-run stability claim.
+High-throughput engineering experiment (archived Voucher/Outbox/RabbitMQ write path, including the failed cold-start round, limitations, and raw evidence): [1,500 RPS experiment record](docs/verification/CONCURRENCY-EXPERIMENT-1500-RPS-2026-09-18.md). It is not an Event performance result, production SLA, or long-run stability claim; see the [archive note](docs/history/LEGACY-VOUCHER-ARCHIVE.md) to reproduce it.
 
 ## Design documents
 

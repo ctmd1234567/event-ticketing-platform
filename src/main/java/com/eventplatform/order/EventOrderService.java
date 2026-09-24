@@ -57,6 +57,7 @@ public class EventOrderService {
         String requestHash = ticketTierId + ":" + quantity;
         OrderView existing = findByKey(userId, idempotencyKey);
         if (existing != null) {
+            log.info("Replayed Event order {}", existing.id());
             return replay(existing, requestHash);
         }
 
@@ -66,10 +67,12 @@ public class EventOrderService {
             if (created == null) {
                 throw new IllegalStateException("Order transaction returned no result");
             }
+            log.info("Created Event order {}", created.id());
             return created;
         } catch (DuplicateKeyException duplicate) {
             existing = findByKey(userId, idempotencyKey);
             if (existing != null) {
+                log.info("Replayed Event order {} after duplicate key", existing.id());
                 return replay(existing, requestHash);
             }
             throw new ResponseStatusException(HttpStatus.CONFLICT,
