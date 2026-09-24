@@ -4,10 +4,12 @@ import com.eventplatform.catalog.EventCatalogService;
 import com.eventplatform.notification.EventNotificationConsumer;
 import com.eventplatform.notification.EventNotificationPublisher;
 import com.eventplatform.notification.EventNotificationQueueConfig;
+import com.eventplatform.notification.EventNotificationQueueMetrics;
 import com.eventplatform.notification.EventNotificationService;
 import com.eventplatform.notification.EventNotificationRedriveService;
 import com.eventplatform.order.EventOrderService;
 import com.eventplatform.payment.EventPaymentService;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.springframework.amqp.core.AmqpAdmin;
 import org.springframework.amqp.core.Binding;
@@ -88,10 +90,21 @@ class EventNotificationIT {
     @Autowired EventNotificationService notifications;
     @Autowired EventNotificationRedriveService redrive;
     @Autowired RabbitTemplate rabbitTemplate;
+    @Autowired EventNotificationQueueMetrics queueMetrics;
+    @Autowired MeterRegistry meterRegistry;
     @Autowired AmqpAdmin admin;
     @Autowired DirectExchange eventNotificationExchange;
     @Autowired Queue eventNotificationQueue;
     @Autowired Binding eventNotificationBinding;
+
+    @Test
+    void readyQueueAndDeadLetterDepthAreObservable() {
+        queueMetrics.sample();
+        assertThat(meterRegistry.get("event.notification.queue.ready").gauge().value()).isGreaterThanOrEqualTo(0);
+        assertThat(meterRegistry.get("event.notification.dlq.ready").gauge().value()).isGreaterThanOrEqualTo(0);
+        assertThat(meterRegistry.get("event.notification.queue.sample.age.seconds")
+                .gauge().value()).isBetween(0.0, 10.0);
+    }
 
     @Test
     void paidAndClosedEventsDeliverOnceAndRecoverFromFaults() throws Exception {

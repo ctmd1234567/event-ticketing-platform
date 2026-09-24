@@ -1,0 +1,17 @@
+{
+  "before": {
+    "event_notification_dlq_ready": "0.0",
+    "event_notification_queue_ready": "0.0",
+    "event_notification_queue_sample_age_seconds": "3.76"
+  },
+  "during": {
+    "event_notification_dlq_ready": "NaN",
+    "event_notification_queue_ready": "NaN",
+    "event_notification_queue_sample_age_seconds": "5.379"
+  },
+  "after": {
+    "event_notification_dlq_ready": "0.0",
+    "event_notification_queue_ready": "0.0",
+    "event_notification_queue_sample_age_seconds": "0.74"
+  }
+}

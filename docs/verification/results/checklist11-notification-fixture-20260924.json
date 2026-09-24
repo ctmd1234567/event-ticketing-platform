@@ -1,0 +1,41 @@
+{
+  "scenario": "normal",
+  "runId": "1790246404775",
+  "fixtureEventId": 5790246404775001,
+  "tiers": [
+    5790246404775010
+  ],
+  "scheduled": 20,
+  "sent": 20,
+  "dropped": 0,
+  "targetRate": 10.0,
+  "workers": 16,
+  "elapsedSeconds": 1.912,
+  "httpSuccess": 20,
+  "businessConflicts": 0,
+  "technicalFailures": 0,
+  "httpCodes": {
+    "200": 20
+  },
+  "httpLatencySeconds": {
+    "p50": 0.0115,
+    "p95": 0.2923,
+    "p99": 0.3857
+  },
+  "mysqlLockStatusDelta": {
+    "Innodb_row_lock_time": 49,
+    "Innodb_row_lock_waits": 3,
+    "lock_deadlocks": 0
+  },
+  "appMetricDelta": {
+    "event_order_create_duration_seconds_count": 20.0,
+    "event_order_create_duration_seconds_sum": 0.161266,
+    "event_order_writes_total": 20.0
+  },
+  "hikariPendingAfter": 0.0,
+  "dbOrdersAndPending": "20\t20",
+  "reservations": 20,
+  "inventoryConservedAndMatched": true,
+  "inventory": "5790246404775010\t30\t10\t20\t0\t1",
+  "technicalErrorSamples": []
+}

@@ -1,0 +1,11 @@
+Isolated MySQL; application stopped; accumulated due rows from earlier disposable workload.
+SELECT @@version,COUNT(*),SUM(status='PENDING_PAYMENT' AND payment_deadline<=NOW()) FROM et_order;
+EXPLAIN ANALYZE SELECT id FROM et_order WHERE status='PENDING_PAYMENT' AND payment_deadline<=CURRENT_TIMESTAMP AND (expiry_next_attempt_at IS NULL OR expiry_next_attempt_at<=CURRENT_TIMESTAMP) ORDER BY payment_deadline,id LIMIT 200;
+EXPLAIN SELECT id FROM et_order WHERE status='PENDING_PAYMENT' AND payment_deadline<=CURRENT_TIMESTAMP AND (expiry_next_attempt_at IS NULL OR expiry_next_attempt_at<=CURRENT_TIMESTAMP) ORDER BY payment_deadline,id LIMIT 200;
+
+@@version	COUNT(*)	SUM(status='PENDING_PAYMENT' AND payment_deadline<=NOW())
+8.4.11	5105	5103
+EXPLAIN
+-> Limit: 200 row(s)  (cost=433 rows=200) (actual time=12.7..12.7 rows=200 loops=1)\n    -> Sort: et_order.payment_deadline, et_order.id, limit input to 200 row(s) per chunk  (cost=433 rows=4989) (actual time=12.7..12.7 rows=200 loops=1)\n        -> Filter: ((et_order.`status` = 'PENDING_PAYMENT') and (et_order.payment_deadline <= <cache>(now())) and ((et_order.expiry_next_attempt_at is null) or (et_order.expiry_next_attempt_at <= <cache>(now()))))  (cost=433 rows=4989) (actual time=0.764..12.3 rows=5103 loops=1)\n            -> Table scan on et_order  (cost=433 rows=4989) (actual time=0.755..11.5 rows=5105 loops=1)\n
+id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
+1	SIMPLE	et_order	NULL	range	ix_event_order_status_deadline	ix_event_order_status_deadline	102	NULL	2494	40.00	Using index condition; Using where

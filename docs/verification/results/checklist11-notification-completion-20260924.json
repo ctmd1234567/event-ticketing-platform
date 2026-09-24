@@ -1,0 +1,250 @@
+{
+  "fixtureEventId": 5790246404775001,
+  "orders": 20,
+  "cancelHttpStatuses": {
+    "200": 20
+  },
+  "httpLatencySeconds": {
+    "p50": 0.053,
+    "p95": 0.0719,
+    "max": 0.0777
+  },
+  "notificationsObserved": 20,
+  "observedCancelStartToNotificationSeconds": {
+    "p50": 0.6144,
+    "p95": 0.6423,
+    "max": 0.6428
+  },
+  "persistedOutboxToNotificationSeconds": {
+    "p50": 0,
+    "p95": 0,
+    "max": 0
+  },
+  "outboxStatusCounts": {
+    "PUBLISHED": 20
+  },
+  "inventory": "30\t30\t0\t0",
+  "perOrder": {
+    "2103071972245118977": {
+      "http": {
+        "status": 200,
+        "seconds": 0.0777,
+        "body": "{\"success\":true,\"data\":{\"id\":2103071972245118977,\"orderNumber\":\"EO2103071972245118977\",\"userId\":5790246404776002,\"eventId\":5790246404775001,\"sessionId\":5790246404775002,\"ticketTierId\":5790246404775010"
+      },
+      "observedEndToEndSeconds": 0.6428,
+      "persistedOutboxToNotificationSeconds": 0,
+      "publishStatus": "PUBLISHED",
+      "attempts": 1
+    },
+    "2103071972291256322": {
+      "http": {
+        "status": 200,
+        "seconds": 0.0451,
+        "body": "{\"success\":true,\"data\":{\"id\":2103071972291256322,\"orderNumber\":\"EO2103071972291256322\",\"userId\":5790246404776000,\"eventId\":5790246404775001,\"sessionId\":5790246404775002,\"ticketTierId\":5790246404775010"
+      },
+      "observedEndToEndSeconds": 0.6423,
+      "persistedOutboxToNotificationSeconds": 0,
+      "publishStatus": "PUBLISHED",
+      "attempts": 1
+    },
+    "2103071972308033538": {
+      "http": {
+        "status": 200,
+        "seconds": 0.0403,
+        "body": "{\"success\":true,\"data\":{\"id\":2103071972308033538,\"orderNumber\":\"EO2103071972308033538\",\"userId\":5790246404776003,\"eventId\":5790246404775001,\"sessionId\":5790246404775002,\"ticketTierId\":5790246404775010"
+      },
+      "observedEndToEndSeconds": 0.6419,
+      "persistedOutboxToNotificationSeconds": 0,
+      "publishStatus": "PUBLISHED",
+      "attempts": 1
+    },
+    "2103071972324810753": {
+      "http": {
+        "status": 200,
+        "seconds": 0.05,
+        "body": "{\"success\":true,\"data\":{\"id\":2103071972324810753,\"orderNumber\":\"EO2103071972324810753\",\"userId\":5790246404776001,\"eventId\":5790246404775001,\"sessionId\":5790246404775002,\"ticketTierId\":5790246404775010"
+      },
+      "observedEndToEndSeconds": 0.6416,
+      "persistedOutboxToNotificationSeconds": 0,
+      "publishStatus": "PUBLISHED",
+      "attempts": 1
+    },
+    "2103071972412891137": {
+      "http": {
+        "status": 200,
+        "seconds": 0.0719,
+        "body": "{\"success\":true,\"data\":{\"id\":2103071972412891137,\"orderNumber\":\"EO2103071972412891137\",\"userId\":5790246404776004,\"eventId\":5790246404775001,\"sessionId\":5790246404775002,\"ticketTierId\":5790246404775010"
+      },
+      "observedEndToEndSeconds": 0.6413,
+      "persistedOutboxToNotificationSeconds": 0,
+      "publishStatus": "PUBLISHED",
+      "attempts": 1
+    },
+    "2103071972832321537": {
+      "http": {
+        "status": 200,
+        "seconds": 0.0347,
+        "body": "{\"success\":true,\"data\":{\"id\":2103071972832321537,\"orderNumber\":\"EO2103071972832321537\",\"userId\":5790246404776005,\"eventId\":5790246404775001,\"sessionId\":5790246404775002,\"ticketTierId\":5790246404775010"
+      },
+      "observedEndToEndSeconds": 0.6409,
+      "persistedOutboxToNotificationSeconds": 0,
+      "publishStatus": "PUBLISHED",
+      "attempts": 1
+    },
+    "2103071973251751938": {
+      "http": {
+        "status": 200,
+        "seconds": 0.0304,
+        "body": "{\"success\":true,\"data\":{\"id\":2103071973251751938,\"orderNumber\":\"EO2103071973251751938\",\"userId\":5790246404776006,\"eventId\":5790246404775001,\"sessionId\":5790246404775002,\"ticketTierId\":5790246404775010"
+      },
+      "observedEndToEndSeconds": 0.6406,
+      "persistedOutboxToNotificationSeconds": 0,
+      "publishStatus": "PUBLISHED",
+      "attempts": 1
+    },
+    "2103071973671182337": {
+      "http": {
+        "status": 200,
+        "seconds": 0.0531,
+        "body": "{\"success\":true,\"data\":{\"id\":2103071973671182337,\"orderNumber\":\"EO2103071973671182337\",\"userId\":5790246404776007,\"eventId\":5790246404775001,\"sessionId\":5790246404775002,\"ticketTierId\":5790246404775010"
+      },
+      "observedEndToEndSeconds": 0.6404,
+      "persistedOutboxToNotificationSeconds": 0,
+      "publishStatus": "PUBLISHED",
+      "attempts": 1
+    },
+    "2103071974086418434": {
+      "http": {
+        "status": 200,
+        "seconds": 0.0575,
+        "body": "{\"success\":true,\"data\":{\"id\":2103071974086418434,\"orderNumber\":\"EO2103071974086418434\",\"userId\":5790246404776008,\"eventId\":5790246404775001,\"sessionId\":5790246404775002,\"ticketTierId\":5790246404775010"
+      },
+      "observedEndToEndSeconds": 0.6399,
+      "persistedOutboxToNotificationSeconds": 0,
+      "publishStatus": "PUBLISHED",
+      "attempts": 1
+    },
+    "2103071974510043137": {
+      "http": {
+        "status": 200,
+        "seconds": 0.0225,
+        "body": "{\"success\":true,\"data\":{\"id\":2103071974510043137,\"orderNumber\":\"EO2103071974510043137\",\"userId\":5790246404776009,\"eventId\":5790246404775001,\"sessionId\":5790246404775002,\"ticketTierId\":5790246404775010"
+      },
+      "observedEndToEndSeconds": 0.6369,
+      "persistedOutboxToNotificationSeconds": 0,
+      "publishStatus": "PUBLISHED",
+      "attempts": 1
+    },
+    "2103071974929473538": {
+      "http": {
+        "status": 200,
+        "seconds": 0.0541,
+        "body": "{\"success\":true,\"data\":{\"id\":2103071974929473538,\"orderNumber\":\"EO2103071974929473538\",\"userId\":5790246404776010,\"eventId\":5790246404775001,\"sessionId\":5790246404775002,\"ticketTierId\":5790246404775010"
+      },
+      "observedEndToEndSeconds": 0.6144,
+      "persistedOutboxToNotificationSeconds": 0,
+      "publishStatus": "PUBLISHED",
+      "attempts": 1
+    },
+    "2103071975344709634": {
+      "http": {
+        "status": 200,
+        "seconds": 0.0544,
+        "body": "{\"success\":true,\"data\":{\"id\":2103071975344709634,\"orderNumber\":\"EO2103071975344709634\",\"userId\":5790246404776011,\"eventId\":5790246404775001,\"sessionId\":5790246404775002,\"ticketTierId\":5790246404775010"
+      },
+      "observedEndToEndSeconds": 0.6102,
+      "persistedOutboxToNotificationSeconds": 0,
+      "publishStatus": "PUBLISHED",
+      "attempts": 1
+    },
+    "2103071975768334337": {
+      "http": {
+        "status": 200,
+        "seconds": 0.0549,
+        "body": "{\"success\":true,\"data\":{\"id\":2103071975768334337,\"orderNumber\":\"EO2103071975768334337\",\"userId\":5790246404776012,\"eventId\":5790246404775001,\"sessionId\":5790246404775002,\"ticketTierId\":5790246404775010"
+      },
+      "observedEndToEndSeconds": 0.6061,
+      "persistedOutboxToNotificationSeconds": 0,
+      "publishStatus": "PUBLISHED",
+      "attempts": 1
+    },
+    "2103071976183570433": {
+      "http": {
+        "status": 200,
+        "seconds": 0.0555,
+        "body": "{\"success\":true,\"data\":{\"id\":2103071976183570433,\"orderNumber\":\"EO2103071976183570433\",\"userId\":5790246404776013,\"eventId\":5790246404775001,\"sessionId\":5790246404775002,\"ticketTierId\":5790246404775010"
+      },
+      "observedEndToEndSeconds": 0.6015,
+      "persistedOutboxToNotificationSeconds": 0,
+      "publishStatus": "PUBLISHED",
+      "attempts": 1
+    },
+    "2103071976603000834": {
+      "http": {
+        "status": 200,
+        "seconds": 0.0546,
+        "body": "{\"success\":true,\"data\":{\"id\":2103071976603000834,\"orderNumber\":\"EO2103071976603000834\",\"userId\":5790246404776014,\"eventId\":5790246404775001,\"sessionId\":5790246404775002,\"ticketTierId\":5790246404775010"
+      },
+      "observedEndToEndSeconds": 0.5971,
+      "persistedOutboxToNotificationSeconds": 0,
+      "publishStatus": "PUBLISHED",
+      "attempts": 1
+    },
+    "2103071977022431234": {
+      "http": {
+        "status": 200,
+        "seconds": 0.0529,
+        "body": "{\"success\":true,\"data\":{\"id\":2103071977022431234,\"orderNumber\":\"EO2103071977022431234\",\"userId\":5790246404776015,\"eventId\":5790246404775001,\"sessionId\":5790246404775002,\"ticketTierId\":5790246404775010"
+      },
+      "observedEndToEndSeconds": 0.5916,
+      "persistedOutboxToNotificationSeconds": 0,
+      "publishStatus": "PUBLISHED",
+      "attempts": 1
+    },
+    "2103071977441861633": {
+      "http": {
+        "status": 200,
+        "seconds": 0.053,
+        "body": "{\"success\":true,\"data\":{\"id\":2103071977441861633,\"orderNumber\":\"EO2103071977441861633\",\"userId\":5790246404776016,\"eventId\":5790246404775001,\"sessionId\":5790246404775002,\"ticketTierId\":5790246404775010"
+      },
+      "observedEndToEndSeconds": 0.5872,
+      "persistedOutboxToNotificationSeconds": 0,
+      "publishStatus": "PUBLISHED",
+      "attempts": 1
+    },
+    "2103071977861292034": {
+      "http": {
+        "status": 200,
+        "seconds": 0.0542,
+        "body": "{\"success\":true,\"data\":{\"id\":2103071977861292034,\"orderNumber\":\"EO2103071977861292034\",\"userId\":5790246404776017,\"eventId\":5790246404775001,\"sessionId\":5790246404775002,\"ticketTierId\":5790246404775010"
+      },
+      "observedEndToEndSeconds": 0.5823,
+      "persistedOutboxToNotificationSeconds": 0,
+      "publishStatus": "PUBLISHED",
+      "attempts": 1
+    },
+    "2103071978280722434": {
+      "http": {
+        "status": 200,
+        "seconds": 0.0459,
+        "body": "{\"success\":true,\"data\":{\"id\":2103071978280722434,\"orderNumber\":\"EO2103071978280722434\",\"userId\":5790246404776018,\"eventId\":5790246404775001,\"sessionId\":5790246404775002,\"ticketTierId\":5790246404775010"
+      },
+      "observedEndToEndSeconds": 0.5694,
+      "persistedOutboxToNotificationSeconds": 0,
+      "publishStatus": "PUBLISHED",
+      "attempts": 1
+    },
+    "2103071978700152833": {
+      "http": {
+        "status": 200,
+        "seconds": 0.0457,
+        "body": "{\"success\":true,\"data\":{\"id\":2103071978700152833,\"orderNumber\":\"EO2103071978700152833\",\"userId\":5790246404776019,\"eventId\":5790246404775001,\"sessionId\":5790246404775002,\"ticketTierId\":5790246404775010"
+      },
+      "observedEndToEndSeconds": 0.565,
+      "persistedOutboxToNotificationSeconds": 0,
+      "publishStatus": "PUBLISHED",
+      "attempts": 1
+    }
+  },
+  "measurementLimit": "Completion observation is bounded by Docker SQL polling; persisted SQL timestamps have one-second resolution."
+}
