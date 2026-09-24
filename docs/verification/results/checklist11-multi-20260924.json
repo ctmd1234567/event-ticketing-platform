@@ -1,0 +1,41 @@
+{
+  "scenario": "multi",
+  "runId": "1790243598884",
+  "fixtureEventId": 5790243598884001,
+  "tiers": [
+    5790243598884010,
+    5790243598884011,
+    5790243598884012,
+    5790243598884013,
+    5790243598884014,
+    5790243598884015,
+    5790243598884016,
+    5790243598884017
+  ],
+  "scheduled": 600,
+  "sent": 600,
+  "dropped": 0,
+  "targetRate": 60.0,
+  "workers": 64,
+  "elapsedSeconds": 9.991,
+  "httpSuccess": 600,
+  "businessConflicts": 0,
+  "technicalFailures": 0,
+  "httpCodes": {
+    "200": 600
+  },
+  "httpLatencySeconds": {
+    "p50": 0.0059,
+    "p95": 0.0076,
+    "p99": 0.0098
+  },
+  "mysqlLockStatusDelta": {
+    "Innodb_row_lock_time": 0,
+    "Innodb_row_lock_waits": 0
+  },
+  "dbOrdersAndPending": "600\t600",
+  "reservations": 600,
+  "inventoryConservedAndMatched": true,
+  "inventory": "5790243598884010\t100\t25\t75\t0\t1\n5790243598884011\t100\t25\t75\t0\t1\n5790243598884012\t100\t25\t75\t0\t1\n5790243598884013\t100\t25\t75\t0\t1\n5790243598884014\t100\t25\t75\t0\t1\n5790243598884015\t100\t25\t75\t0\t1\n5790243598884016\t100\t25\t75\t0\t1\n5790243598884017\t100\t25\t75\t0\t1",
+  "technicalErrorSamples": []
+}

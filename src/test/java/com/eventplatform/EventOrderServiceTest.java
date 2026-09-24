@@ -65,7 +65,8 @@ class EventOrderServiceTest {
             """);
         catalog = new EventCatalogService(db);
         orders = new EventOrderService(db, new DataSourceTransactionManager(source),
-                new EventNotificationOutbox(db, new ObjectMapper()), 900, 30);
+                new EventNotificationOutbox(db, new ObjectMapper()), 900, 30,
+                new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
     }
 
     @Test
