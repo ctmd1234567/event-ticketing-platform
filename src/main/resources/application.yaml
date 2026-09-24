@@ -85,6 +85,8 @@ management:
 mybatis-plus:
   type-aliases-package: com.eventplatform.entity
 logging:
+  pattern:
+    level: "%5p [requestId=%X{requestId:-}]"
   level:
     com.eventplatform: info
 app:

@@ -1,0 +1,29 @@
+## environment
+SELECT @@version,@@transaction_isolation,(SELECT COUNT(*) FROM et_order),(SELECT COUNT(*) FROM et_ticket_tier),(SELECT COUNT(*) FROM et_outbox_event);
+8.4.11	REPEATABLE-READ	4204	25	2
+
+## idempotency lookup
+EXPLAIN ANALYZE SELECT id,status FROM et_order WHERE user_id=5790244062846001 AND idempotency_key='item11-1790244062845-000001';
+-> Rows fetched before execution  (cost=0..0 rows=1) (actual time=0.00287..0.00291 rows=1 loops=1)
+
+
+## expired order scan
+EXPLAIN ANALYZE SELECT id FROM et_order WHERE status='PENDING_PAYMENT' AND payment_deadline<=CURRENT_TIMESTAMP AND (expiry_next_attempt_at IS NULL OR expiry_next_attempt_at<=CURRENT_TIMESTAMP) ORDER BY payment_deadline,id LIMIT 200;
+-> Limit: 200 row(s)  (cost=2.03 rows=0.4) (actual time=0.0956..0.0956 rows=0 loops=1)
+    -> Filter: ((et_order.expiry_next_attempt_at is null) or (et_order.expiry_next_attempt_at <= <cache>(now())))  (cost=2.03 rows=0.4) (actual time=0.0946..0.0946 rows=0 loops=1)
+        -> Index range scan on et_order using ix_event_order_status_deadline over (status = 'PENDING_PAYMENT' AND payment_deadline <= '2026-09-24 10:01:43'), with index condition: ((et_order.`status` = 'PENDING_PAYMENT') and (et_order.payment_deadline <= <cache>(now())))  (cost=2.03 rows=1) (actual time=0.0125..0.0125 rows=0 loops=1)
+
+
+## ticket tier join
+EXPLAIN ANALYZE SELECT e.id,s.id,t.available FROM et_ticket_tier t JOIN et_event_session s ON s.id=t.session_id JOIN et_event e ON e.id=s.event_id WHERE t.id=5790244062845010;
+-> Rows fetched before execution  (cost=0..0 rows=1) (actual time=440e-6..516e-6 rows=1 loops=1)
+
+
+## conditional inventory update row count
+START TRANSACTION; SELECT available,reserved FROM et_ticket_tier WHERE id=5790244062845010 FOR UPDATE; UPDATE et_ticket_tier SET available=available-1,reserved=reserved+1 WHERE id=5790244062845010 AND available>=1; SELECT ROW_COUNT(); ROLLBACK;
+50	100
+1
+
+## deadlocks
+SELECT NAME,COUNT FROM information_schema.INNODB_METRICS WHERE NAME='lock_deadlocks';
+lock_deadlocks	0

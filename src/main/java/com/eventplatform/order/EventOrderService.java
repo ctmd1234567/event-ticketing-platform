@@ -3,6 +3,7 @@ package com.eventplatform.order;
 import com.baomidou.mybatisplus.core.toolkit.IdWorker;
 import com.eventplatform.notification.EventNotificationOutbox;
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -22,6 +23,7 @@ import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 @Service
 public class EventOrderService {
@@ -34,16 +36,19 @@ public class EventOrderService {
     private final TransactionTemplate transactions;
     private final Duration paymentWindow;
     private final Duration expiryFailureRetry;
+    private final MeterRegistry metrics;
 
     public EventOrderService(JdbcTemplate db, PlatformTransactionManager transactionManager,
             EventNotificationOutbox notificationOutbox,
             @Value("${app.event-orders.payment-window-seconds:900}") long paymentWindowSeconds,
-            @Value("${app.event-orders.expiry-failure-retry-seconds:30}") long expiryFailureRetrySeconds) {
+            @Value("${app.event-orders.expiry-failure-retry-seconds:30}") long expiryFailureRetrySeconds,
+            MeterRegistry metrics) {
         this.db = db;
         this.notificationOutbox = notificationOutbox;
         this.transactions = new TransactionTemplate(transactionManager);
         this.paymentWindow = Duration.ofSeconds(Math.max(1, paymentWindowSeconds));
         this.expiryFailureRetry = Duration.ofSeconds(Math.max(1, expiryFailureRetrySeconds));
+        this.metrics = metrics;
     }
 
     public OrderView create(long userId, String idempotencyKey, long ticketTierId, int quantity) {
@@ -60,12 +65,16 @@ public class EventOrderService {
             return replay(existing, requestHash);
         }
 
+        long started = System.nanoTime();
         try {
             OrderView created = transactions.execute(status -> createNew(
                     userId, idempotencyKey, requestHash, ticketTierId, quantity));
             if (created == null) {
                 throw new IllegalStateException("Order transaction returned no result");
             }
+            metrics.counter("event.order.writes").increment();
+            metrics.timer("event.order.create.duration").record(System.nanoTime() - started, TimeUnit.NANOSECONDS);
+            log.info("Created event order {} for ticket tier {}", created.id(), ticketTierId);
             return created;
         } catch (DuplicateKeyException duplicate) {
             existing = findByKey(userId, idempotencyKey);

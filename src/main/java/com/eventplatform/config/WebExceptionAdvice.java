@@ -4,6 +4,8 @@ import com.eventplatform.dto.Result;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
+import org.springframework.jdbc.CannotGetJdbcConnectionException;
+import org.springframework.transaction.CannotCreateTransactionException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.server.ResponseStatusException;
@@ -23,6 +25,12 @@ public class WebExceptionAdvice {
             org.springframework.http.converter.HttpMessageNotReadableException.class})
     public ResponseEntity<Result> invalid(Exception exception) {
         return ResponseEntity.badRequest().body(Result.fail("Invalid request parameters"));
+    }
+
+    @ExceptionHandler({CannotGetJdbcConnectionException.class, CannotCreateTransactionException.class})
+    public ResponseEntity<Result> databaseUnavailable(RuntimeException exception) {
+        log.warn("Event database is temporarily unavailable: {}", exception.toString());
+        return ResponseEntity.status(503).body(Result.fail("Database is temporarily unavailable"));
     }
 
     @ExceptionHandler(RuntimeException.class)

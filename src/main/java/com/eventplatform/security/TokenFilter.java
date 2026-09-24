@@ -18,6 +18,7 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.filter.OncePerRequestFilter;
+import org.slf4j.MDC;
 import java.io.IOException;
 import java.util.*;
 
@@ -55,6 +56,11 @@ public class TokenFilter extends OncePerRequestFilter {
             throws IOException, ServletException {
         UserHolder.removeUser();
         SecurityContextHolder.clearContext();
+        String suppliedId = req.getHeader("X-Request-Id");
+        String requestId = suppliedId != null && suppliedId.matches("[A-Za-z0-9._-]{1,64}")
+                ? suppliedId : UUID.randomUUID().toString();
+        MDC.put("requestId", requestId);
+        res.setHeader("X-Request-Id", requestId);
         try {
             try {
                 String token = token(req);
@@ -88,6 +94,7 @@ public class TokenFilter extends OncePerRequestFilter {
         } finally {
             UserHolder.removeUser();
             SecurityContextHolder.clearContext();
+            MDC.remove("requestId");
         }
     }
 }

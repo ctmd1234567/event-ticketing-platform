@@ -1,0 +1,34 @@
+{
+  "scenario": "stress",
+  "runId": "1790243559054",
+  "fixtureEventId": 5790243559054001,
+  "tiers": [
+    5790243559054010
+  ],
+  "scheduled": 600,
+  "sent": 600,
+  "dropped": 0,
+  "targetRate": 60.0,
+  "workers": 64,
+  "elapsedSeconds": 9.991,
+  "httpSuccess": 600,
+  "businessConflicts": 0,
+  "technicalFailures": 0,
+  "httpCodes": {
+    "200": 600
+  },
+  "httpLatencySeconds": {
+    "p50": 0.0076,
+    "p95": 0.0099,
+    "p99": 0.0142
+  },
+  "mysqlLockStatusDelta": {
+    "Innodb_row_lock_time": 20,
+    "Innodb_row_lock_waits": 4
+  },
+  "dbOrdersAndPending": "600\t600",
+  "reservations": 600,
+  "inventoryConservedAndMatched": true,
+  "inventory": "5790243559054010\t800\t200\t600\t0\t1",
+  "technicalErrorSamples": []
+}
