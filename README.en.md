@@ -184,7 +184,7 @@ src/test/                         unit, concurrency, and Testcontainers acceptan
 docs/                             architecture, state machines, API, evidence
 postman/                          Event V1 collection and local environment
 scripts/                          V1 joint demo
-loadtest/                         Event baseline and isolated historical experiment
+loadtest/                         Event baseline, bounded item 11 load, and isolated historical experiment
 ```
 
 ## Current boundary and roadmap
@@ -193,7 +193,8 @@ loadtest/                         Event baseline and isolated historical experim
 - V2 item 8: Event Notification Outbox/MQ and in-app notifications; see the [item 8 record](docs/verification/CHECKLIST-8-EVENT-NOTIFICATIONS.md)
 - V2 item 9: broker outage recovery, notification DLQ, and audited admin redrive; see the [item 9 record](docs/verification/CHECKLIST-9-MQ-RECOVERY.md)
 - V2 item 10: full user refunds and targeted reconciliation; see the [item 10 record](docs/verification/CHECKLIST-10-REFUND-RECONCILIATION.md)
-- Later V2 items: SQL, load, and dependency-failure evidence
+- V2 item 11: Event SQL plans, Normal/Stress/Spike and multi-tier load, and dependency-failure evidence; see the [item 11 record](docs/verification/CHECKLIST-11-SQL-LOAD-DEPENDENCIES.md) for results and limits. This measured envelope did not justify admission control or stock buckets.
+- V2 item 12: engineering cleanup and final main-version acceptance remain
 - V3: optional soak, alerting, and backup/recovery evidence; not a completion gate
 
 Not implemented: SSE delivery, generalized reconciliation, and complete OpenAPI. Authenticated users can query their latest 100 notifications with `GET /api/v1/notifications`; admins can redrive after investigating the cause. A DLQ and single-node persistence are not a zero-loss guarantee.

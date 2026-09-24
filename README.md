@@ -184,7 +184,7 @@ src/test/                         单元、并发与 Testcontainers 验收
 docs/                             架构、状态机、API 与验证证据
 postman/                          Event V1 请求集合与本地环境
 scripts/                          V1 联合 Demo
-loadtest/                         Event 基线与隔离的历史工程实验
+loadtest/                         Event 基线、第 11 项有界负载与隔离的历史工程实验
 ```
 
 ## 当前边界与路线图
@@ -193,7 +193,8 @@ loadtest/                         Event 基线与隔离的历史工程实验
 - V2 第 8 项：Event Notification Outbox/MQ 与站内通知；实现与验收见 [第 8 项记录](docs/verification/CHECKLIST-8-EVENT-NOTIFICATIONS.md)
 - V2 第 9 项：Broker 停机恢复、通知 DLQ 与管理员重驱；测试条件、迁移和限制见 [第 9 项记录](docs/verification/CHECKLIST-9-MQ-RECOVERY.md)
 - V2 第 10 项：用户全额退款与针对性对账；实现、验证和限制见 [第 10 项记录](docs/verification/CHECKLIST-10-REFUND-RECONCILIATION.md)
-- V2 后续：SQL、负载与依赖故障证据
+- V2 第 11 项：Event SQL、Normal/Stress/Spike、多票档负载及依赖故障证据；结果和限制见 [第 11 项记录](docs/verification/CHECKLIST-11-SQL-LOAD-DEPENDENCIES.md)。实测未显示当前负载需要准入保护或库存分桶。
+- V2 第 12 项：工程收尾与主打版本联合验收待完成
 - V3：按需要选择 Soak、告警、备份恢复等增强；不是项目完成门槛
 
 未实现：SSE 推送、通用对账框架和完整 OpenAPI。站内通知可由登录用户通过 `GET /api/v1/notifications` 查询最近 100 条；管理员可在确认原因后审计重驱。DLQ 和单节点持久化不构成零丢失保证。
