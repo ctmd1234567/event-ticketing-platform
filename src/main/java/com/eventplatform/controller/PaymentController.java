@@ -40,6 +40,11 @@ public class PaymentController {
         return Result.ok(refunds.refund(refundId, actorId()));
     }
 
+    @PostMapping("/api/v1/payments/{paymentId}/refunds")
+    public Result requestRefund(@PathVariable long paymentId) {
+        return Result.ok(refunds.requestFullRefund(paymentId, actorId()));
+    }
+
     @PostMapping("/api/v1/refunds/{refundId}/refresh")
     public Result refreshRefund(@PathVariable long refundId) {
         return Result.ok(refunds.refresh(refundId, actorId()));

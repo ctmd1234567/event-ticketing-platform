@@ -47,6 +47,52 @@ public class EventRefundService {
         }
     }
 
+    /** One full refund per successful payment; the provider call uses the existing recovery path. */
+    public RefundView requestFullRefund(long paymentId, long userId) {
+        requireNoTransaction();
+        var ownership = db.queryForList("SELECT order_id FROM et_payment WHERE id=? AND user_id=?",
+                Long.class, paymentId, userId);
+        if (ownership.isEmpty()) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Payment not found");
+        long orderId = ownership.getFirst();
+        RefundIntent intent = required(transactions.execute(tx -> {
+            String orderStatus = lockOrder(orderId);
+            PaymentBinding payment = lockPayment(paymentId);
+            var existing = db.queryForList("SELECT id FROM et_refund WHERE payment_id=?", Long.class, paymentId);
+            if (!existing.isEmpty()) {
+                RefundView prior = lockRefund(existing.getFirst());
+                if (!"USER_REQUEST".equals(refundReason(prior.id()))) {
+                    throw conflict("Payment already has a compensation refund");
+                }
+                return new RefundIntent(prior.id(), false);
+            }
+            if (!("PAID".equals(orderStatus) || "FULFILLED".equals(orderStatus))
+                    || !"SUCCEEDED".equals(payment.status())) {
+                throw conflict("Only a paid order can request a full refund");
+            }
+            String reservation = db.queryForObject(
+                    "SELECT status FROM et_inventory_reservation WHERE order_id=? FOR UPDATE",
+                    String.class, orderId);
+            if (!"CONFIRMED".equals(reservation)) throw conflict("Paid inventory is not confirmed");
+            long id = IdWorker.getId();
+            changed(db.update("UPDATE et_order SET status='REFUNDING' WHERE id=? AND status=?",
+                    orderId, orderStatus));
+            changed(db.update("""
+                    INSERT INTO et_refund(id,refund_number,payment_id,reason,amount,currency,status,
+                        recovery_status,attempts,next_attempt_at)
+                    VALUES (?, ?,?,'USER_REQUEST',?,?,'REQUESTED','AUTO',0,?)
+                    """, id, "ER" + id, paymentId, payment.amount(), payment.currency(), Timestamp.from(now())));
+            history(id, null, "REQUESTED", "USER_REFUND_REQUESTED", null, null,
+                    userId, null, null);
+            return new RefundIntent(id, true);
+        }));
+        RefundView current = refundById(intent.id());
+        return intent.created() ? recover(current, null) : current;
+    }
+
+    private String refundReason(long refundId) {
+        return db.queryForObject("SELECT reason FROM et_refund WHERE id=?", String.class, refundId);
+    }
+
     RefundView refundByNumber(String refundNumber) {
         try {
             return db.queryForObject(selectRefund() + " WHERE r.refund_number=?", this::map, refundNumber);
@@ -218,6 +264,11 @@ public class EventRefundService {
             history(refundId, current.status(), next,
                     callbackId == null ? "REFUND_GATEWAY_RESULT" : "REFUND_CALLBACK_RESULT", null, callbackId,
                     null, null, null);
+            if (result.status() == GatewayResultStatus.SUCCEEDED
+                    && "USER_REQUEST".equals(refundReason(refundId))) {
+                changed(db.update("UPDATE et_order SET status='REFUNDED' WHERE id=? AND status='REFUNDING'",
+                        current.orderId()));
+            }
             if (callbackId != null) markCallbackApplied(callbackId);
             return refundById(refundId);
         }));
@@ -252,7 +303,11 @@ public class EventRefundService {
 
     private void validateBinding(String orderStatus, PaymentBinding payment, RefundView refund,
             SimulatedPaymentGateway.GatewayRefund result) {
-        if (!"CLOSED".equals(orderStatus) || !"SUCCEEDED".equals(payment.status())
+        String reason = refundReason(refund.id());
+        boolean validOrder = "LATE_PAYMENT".equals(reason) && "CLOSED".equals(orderStatus)
+                || "USER_REQUEST".equals(reason)
+                && ("REFUNDING".equals(orderStatus) || "REFUNDED".equals(orderStatus));
+        if (!validOrder || !"SUCCEEDED".equals(payment.status())
                 || result == null || result.status() == null
                 || payment.id() != refund.paymentId() || payment.amount() != refund.amount()
                 || !payment.currency().equals(refund.currency())
@@ -382,6 +437,7 @@ public class EventRefundService {
     }
 
     private record PaymentBinding(long id, String status, long amount, String currency) {}
+    private record RefundIntent(long id, boolean created) {}
 
     public record RefundView(long id, String refundNumber, long paymentId, long orderId, long userId,
             String paymentNumber, String orderReference, long amount, String currency, String status,

@@ -160,9 +160,9 @@ RESULT_FILE=docs/verification/results/event-order-creation-baseline.md \
 - 公开目录：`GET /api/v1/events`、`GET /api/v1/events/{id}`
 - ADMIN 建档：`POST /api/v1/admin/events`、场次、票档、发布与停售命令
 - 用户订单：`POST /api/v1/orders`、查询、列表、取消
-- 支付恢复：创建支付、查询/刷新支付与补偿退款
+- 支付与退款：创建/查询/刷新支付，用户申请全额退款，查询/刷新退款
 - 可信回调：`POST /api/v1/payment-callbacks/simulated`
-- ADMIN 接管：查询恢复工作、同号重试支付/退款
+- ADMIN 接管：查询恢复工作、同号重试支付/退款、针对性对账与安全修复
 
 请求和状态语义以 [API 合同](docs/architecture/API-CONTRACT.md) 为准。
 
@@ -174,12 +174,12 @@ src/main/java/com/eventplatform/
 ├── controller/    Event、Order、Payment、Identity、Notification API
 ├── notification/  Event Outbox、RabbitMQ 发布消费、站内通知查询
 ├── order/         同步订单、库存、关单；隔离的历史工程实验
-├── payment/       网关边界、回调、UNKNOWN 恢复、补偿退款
+├── payment/       网关边界、回调、UNKNOWN 恢复、全额退款与针对性对账
 ├── security/      Token、验证码、权限与限流
 ├── service/       最小身份服务
 └── config/        Security、MyBatis、实验 Rabbit 配置
 
-src/main/resources/db/migration/   Flyway V1～V6 不可回写；V7/V8 新增通知与恢复表
+src/main/resources/db/migration/   Flyway V1～V6 不可回写；V7～V9 为前向迁移
 src/test/                         单元、并发与 Testcontainers 验收
 docs/                             架构、状态机、API 与验证证据
 postman/                          Event V1 请求集合与本地环境
@@ -192,10 +192,11 @@ loadtest/                         Event 基线与隔离的历史工程实验
 - 当前完成：V1 Core Trading；证据见 [V1 验收记录](docs/verification/V1-VERIFICATION.md)
 - V2 第 8 项：Event Notification Outbox/MQ 与站内通知；实现与验收见 [第 8 项记录](docs/verification/CHECKLIST-8-EVENT-NOTIFICATIONS.md)
 - V2 第 9 项：Broker 停机恢复、通知 DLQ 与管理员重驱；测试条件、迁移和限制见 [第 9 项记录](docs/verification/CHECKLIST-9-MQ-RECOVERY.md)
-- V2 后续：用户全额退款、针对性对账和故障证据
+- V2 第 10 项：用户全额退款与针对性对账；实现、验证和限制见 [第 10 项记录](docs/verification/CHECKLIST-10-REFUND-RECONCILIATION.md)
+- V2 后续：SQL、负载与依赖故障证据
 - V3：按需要选择 Soak、告警、备份恢复等增强；不是项目完成门槛
 
-未实现：用户主动退款、SSE 推送、通用对账框架和完整 OpenAPI。站内通知可由登录用户通过 `GET /api/v1/notifications` 查询最近 100 条；管理员可在确认原因后审计重驱。DLQ 和单节点持久化不构成零丢失保证。
+未实现：SSE 推送、通用对账框架和完整 OpenAPI。站内通知可由登录用户通过 `GET /api/v1/notifications` 查询最近 100 条；管理员可在确认原因后审计重驱。DLQ 和单节点持久化不构成零丢失保证。
 
 高并发工程实验（隔离的 Voucher/Outbox/RabbitMQ 写链路，包含失败冷启动轮次、限制和原始证据）：[1500 RPS 实验记录](docs/verification/CONCURRENCY-EXPERIMENT-1500-RPS-2026-09-18.md)。该实验不代表 Event 性能、生产 SLA 或长期稳定性。
 

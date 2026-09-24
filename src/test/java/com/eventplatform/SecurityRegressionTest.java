@@ -3,8 +3,10 @@ package com.eventplatform;
 import com.eventplatform.config.SecurityConfig;
 import com.eventplatform.controller.EventNotificationController;
 import com.eventplatform.controller.EventNotificationAdminController;
+import com.eventplatform.controller.EventReconciliationAdminController;
 import com.eventplatform.notification.EventNotificationRedriveService;
 import com.eventplatform.notification.EventNotificationService;
+import com.eventplatform.payment.EventReconciliationService;
 import com.eventplatform.security.TokenFilter;
 import com.eventplatform.utils.UserHolder;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -36,7 +38,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @WebMvcTest(controllers = {SecurityRegressionTest.Probe.class, EventNotificationController.class,
-        EventNotificationAdminController.class},
+        EventNotificationAdminController.class, EventReconciliationAdminController.class},
         properties = {"app.security.admin-user-ids=1", "app.event-notifications.enabled=true"},
         excludeAutoConfiguration = org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration.class)
 @Import({SecurityConfig.class, SecurityRegressionTest.Probe.class})
@@ -47,6 +49,8 @@ class SecurityRegressionTest {
     EventNotificationService notifications;
     @MockitoBean
     EventNotificationRedriveService redrive;
+    @MockitoBean
+    EventReconciliationService reconciliation;
 
     @Autowired
     MockMvc mvc;
@@ -141,6 +145,26 @@ class SecurityRegressionTest {
                         .contentType("application/json").content(body))
                 .andExpect(status().isOk());
         org.mockito.Mockito.verify(redrive).redrive("ORDER_CLOSED:10", 1L, "Corrected payload");
+    }
+
+    @Test
+    void reconciliationReadAndRepairRequireAdmin() throws Exception {
+        String path = "/api/v1/admin/reconciliation";
+        mvc.perform(get(path)).andExpect(status().isUnauthorized());
+        mvc.perform(get(path).header("authorization", USER)).andExpect(status().isForbidden());
+        mvc.perform(get(path).header("authorization", ADMIN)).andExpect(status().isOk());
+        mvc.perform(get(path).header("authorization", ADMIN)
+                        .param("limit", "1").param("afterOrderId", "10")
+                        .param("afterPaymentId", "11").param("afterUnknownId", "12")
+                        .param("afterUnknownKind", "REFUND").param("afterEventId", "ORDER_PAID:13"))
+                .andExpect(status().isOk());
+        mvc.perform(post(path + "/payments/12/late-refund").header("authorization", USER))
+                .andExpect(status().isForbidden());
+        mvc.perform(post(path + "/payments/12/late-refund").header("authorization", ADMIN))
+                .andExpect(status().isOk());
+        org.mockito.Mockito.verify(reconciliation).scan(50, 0, 0, 0, "", "");
+        org.mockito.Mockito.verify(reconciliation).scan(1, 10, 11, 12, "REFUND", "ORDER_PAID:13");
+        org.mockito.Mockito.verify(reconciliation).repairMissingLateRefund(12L, 1L);
     }
 
     @Test

@@ -38,20 +38,19 @@ stateDiagram-v2
     PAID --> REFUNDING: refund accepted
     FULFILLED --> REFUNDING: refund accepted
     REFUNDING --> REFUNDED: refund succeeds
-    REFUNDING --> PAID: refund fails before fulfillment
-    REFUNDING --> FULFILLED: refund fails after fulfillment
 ```
 
 Rules:
 
-- Item 6 implements `PENDING_PAYMENT -> PAID` and `PENDING_PAYMENT -> CLOSED`.
-  Fulfillment and user-requested refund order transitions remain later scope.
+- V1 implements `PENDING_PAYMENT -> PAID` and `PENDING_PAYMENT -> CLOSED`.
+  Item 10 adds user-requested `PAID`/`FULFILLED -> REFUNDING -> REFUNDED`.
+  Fulfillment itself remains later scope.
 - `PENDING_PAYMENT` owns a `RESERVED` inventory reservation.
 - `PAID` and `FULFILLED` own a `CONFIRMED` reservation.
 - `CLOSED` owns a `RELEASED` reservation; `closeReason` distinguishes cancellation from expiration.
 - A late payment for `CLOSED` never reopens the order. It creates one compensating full refund and a visible recovery record.
 - Timeout and payment processing compete on the same guarded transition; exactly one wins.
-- A refund failure returns the order to the state captured when the refund started.
+- A failed or unknown user refund leaves the order `REFUNDING` until audited retry or recovery resolves it.
 - `CLOSED` and `REFUNDED` are terminal.
 
 ## Payment
@@ -93,10 +92,11 @@ stateDiagram-v2
 Rules:
 
 - `SUCCEEDED` is terminal.
-- V1 creates at most one late-payment compensation refund per payment; gateway
-  retries reuse its refund number, and operator retry idempotency is audited separately.
-- Late-payment compensation leaves the order `CLOSED`. User-requested full
-  refunds and their order transitions remain V2 scope.
+- V1 creates late-payment compensation refunds. Item 10 adds user-requested full
+  refunds; each payment has at most one refund, and gateway retries reuse its refund number.
+  Operator retry idempotency is audited separately.
+- Late-payment compensation leaves the order `CLOSED`. A successful user refund
+  changes `REFUNDING` to `REFUNDED` in the same transaction as the local refund result.
 - Refund success does not change inventory: normal paid inventory remains allocated, while a closed order was already released.
 - Automatic retries are bounded; exhaustion preserves the current business state
   and marks `MANUAL_REQUIRED`. Explicit provider failure also requires an audited
