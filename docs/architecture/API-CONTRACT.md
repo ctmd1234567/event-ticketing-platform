@@ -2,7 +2,7 @@
 
 Updated: 2026-09-23
 
-This document describes the implemented V1 HTTP surface and V2 notification read and admin redrive endpoints. User-created refunds and general reconciliation remain planned work.
+This document describes the V1 transaction API and the V2 notification, full-refund, and focused reconciliation endpoints.
 
 ## Conventions
 
@@ -91,12 +91,15 @@ Create request:
 - `POST /api/v1/orders/{orderId}/payments` — requires `Idempotency-Key`.
 - `GET /api/v1/payments/{paymentId}`
 - `POST /api/v1/payments/{paymentId}/refresh`
+- `POST /api/v1/payments/{paymentId}/refunds` — requests a full refund of the caller's successful payment.
 - `GET /api/v1/refunds/{refundId}`
 - `POST /api/v1/refunds/{refundId}/refresh`
 
 V1 has one logical payment per order. Replays reuse the same payment number. Transport timeout/reset becomes `UNKNOWN`, not `FAILED`. Refresh queries trusted provider state and may converge the local record.
 
-Refund routes expose only system-created late-payment compensation. There is no user-facing refund-create endpoint. If local closure commits first and an already initiated payment later succeeds, the result transaction keeps the order closed and creates exactly one full refund intent. Refund success never returns allocated or released inventory to sale.
+The full-refund request accepts a `PAID` or `FULFILLED` order with a successful payment and confirmed reservation. It atomically records one refund intent and moves the order to `REFUNDING`; provider submission runs after commit through the existing refund recovery path. A repeated request returns that refund. A successful result moves the order to `REFUNDED`; a failed or unknown result remains queryable and follows the existing recovery and audited retry routes. Refund amount equals the paid amount, with one refund per payment. Allocated inventory remains allocated.
+
+If local closure commits first and an already initiated payment later succeeds, the payment result transaction keeps the order closed and creates one `LATE_PAYMENT` compensation intent. That refund uses the same provider and recovery mechanisms. A closed payment cannot be used for a new user refund.
 
 ## Owned notifications
 
@@ -120,11 +123,17 @@ The server verifies freshness, HMAC-SHA256, provider result identifiers, busines
 - `GET /api/v1/admin/payment-recovery?limit=50&afterId=0`
 - `POST /api/v1/admin/payments/{paymentId}/retry`
 - `POST /api/v1/admin/refunds/{refundId}/retry`
+- `GET /api/v1/admin/reconciliation?limit=50` — one bounded, repeatable-read snapshot of four finding groups: `closedWithReservation`, `paymentRefundConflict`, `longUnknown`, and `stalledOutbox`. Each group is limited to 1–100 rows; the response includes `checkedAt`.
+- `POST /api/v1/admin/reconciliation/payments/{paymentId}/late-refund` — conditionally creates a missing late-payment compensation intent after locking the order, payment, and released reservation. Repeating it returns the same refund ID. The history row records the admin actor. It does not call the provider; normal refund recovery dispatches the intent.
+
+To advance the four finding groups independently, pass `afterOrderId`, `afterPaymentId`, `afterUnknownId` plus `afterUnknownKind`, and `afterEventId` from the last item in each returned group. All cursors default to `0` or empty. `longUnknown` sorts by `(id, kind)`; the other groups sort by their listed ID. Continue until the relevant group returns an empty page. Each HTTP call has its own consistent snapshot; for a complete audit across multiple pages, stop concurrent writes while paging or repeat the sweep and compare results.
 - `POST /api/v1/admin/notifications/{eventId}/redrive` — JSON body `{"reason":"..."}`; requires ADMIN, an existing original Event Outbox row, and no completed notification. `MANUAL_REQUIRED` Outbox events are reactivated; a `PUBLISHED` event with a missing effect is republished using its original eventId. The response includes an operation ID and `PENDING` or `CONFIRMED`. `CONFIRMED` is a broker publish result, not proof of a committed notification.
 
 Retry mutations require `Idempotency-Key` and a nonblank reason of at most 255 characters. They query/reuse the original business number; an operator cannot manually mark a payment or refund successful.
 
 Notification redrive requires a nonblank reason of at most 255 characters and records the actor, action, outcome, and original eventId in `et_notification_redrive`. It does not use the payment/refund `Idempotency-Key` header. Operators inspect `et_outbox_event`, `et_notification_failure`, the RabbitMQ DLQ, and `et_notification` before redrive; duplicate delivery is deduplicated by `et_notification.event_id`.
+
+Reconciliation findings require operator review except for the missing late-refund intent route above. In particular, the endpoint never alters inventory, payment outcomes, existing refunds, or an Outbox row. Long `UNKNOWN` means older than 15 minutes; pending or effect-missing Outbox findings mean older than 10 minutes. A lease that has expired or an event requiring manual recovery appears immediately. These thresholds are triage criteria, not proof of provider or Broker failure.
 
 ## HTTP status behavior
 

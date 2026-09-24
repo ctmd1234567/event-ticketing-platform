@@ -160,9 +160,9 @@ RESULT_FILE=docs/verification/results/event-order-creation-baseline.md \
 - Public catalog: `GET /api/v1/events`, `GET /api/v1/events/{id}`
 - ADMIN catalog commands: create events, sessions, tiers, publish, and take off sale
 - Owned orders: create, read, list, and cancel
-- Payment recovery: create payment, read/refresh payment and compensation refund
+- Payments and refunds: create/read/refresh payment, request a full refund, read/refresh refund
 - Trusted callback: `POST /api/v1/payment-callbacks/simulated`
-- ADMIN recovery: inspect work and retry a payment/refund under the same number
+- ADMIN recovery: inspect work, retry a payment/refund under the same number, and run focused reconciliation
 
 The [API contract](docs/architecture/API-CONTRACT.md) is the source of truth for request and state semantics.
 
@@ -174,12 +174,12 @@ src/main/java/com/eventplatform/
 ├── controller/    Event, Order, Payment, Identity, Notification APIs
 ├── notification/  Event Outbox, RabbitMQ publisher/consumer, in-app reads
 ├── order/         Synchronous ordering and expiry; isolated historical experiment
-├── payment/       Gateway boundary, callbacks, UNKNOWN recovery, compensation
+├── payment/       Gateway boundary, callbacks, UNKNOWN recovery, full refunds and reconciliation
 ├── security/      Tokens, codes, authorization, rate limiting
 ├── service/       Minimal identity service
 └── config/        Security, MyBatis, experimental Rabbit configuration
 
-src/main/resources/db/migration/   Flyway V1–V6 preserved; V7/V8 add notification and recovery tables
+src/main/resources/db/migration/   Flyway V1–V6 preserved; V7–V9 are forward migrations
 src/test/                         unit, concurrency, and Testcontainers acceptance
 docs/                             architecture, state machines, API, evidence
 postman/                          Event V1 collection and local environment
@@ -192,10 +192,11 @@ loadtest/                         Event baseline and isolated historical experim
 - Complete now: V1 Core Trading; see the [V1 verification record](docs/verification/V1-VERIFICATION.md)
 - V2 item 8: Event Notification Outbox/MQ and in-app notifications; see the [item 8 record](docs/verification/CHECKLIST-8-EVENT-NOTIFICATIONS.md)
 - V2 item 9: broker outage recovery, notification DLQ, and audited admin redrive; see the [item 9 record](docs/verification/CHECKLIST-9-MQ-RECOVERY.md)
-- Later V2 items: full user refunds, targeted reconciliation, and dependency-failure evidence
+- V2 item 10: full user refunds and targeted reconciliation; see the [item 10 record](docs/verification/CHECKLIST-10-REFUND-RECONCILIATION.md)
+- Later V2 items: SQL, load, and dependency-failure evidence
 - V3: optional soak, alerting, and backup/recovery evidence; not a completion gate
 
-Not implemented: user-initiated refunds, SSE delivery, generalized reconciliation, and complete OpenAPI. Authenticated users can query their latest 100 notifications with `GET /api/v1/notifications`; admins can redrive after investigating the cause. A DLQ and single-node persistence are not a zero-loss guarantee.
+Not implemented: SSE delivery, generalized reconciliation, and complete OpenAPI. Authenticated users can query their latest 100 notifications with `GET /api/v1/notifications`; admins can redrive after investigating the cause. A DLQ and single-node persistence are not a zero-loss guarantee.
 
 High-throughput engineering experiment (isolated Voucher/Outbox/RabbitMQ write path, including the failed cold-start round, limitations, and raw evidence): [1,500 RPS experiment record](docs/verification/CONCURRENCY-EXPERIMENT-1500-RPS-2026-09-18.md). It is not an Event performance result, production SLA, or long-run stability claim.
 

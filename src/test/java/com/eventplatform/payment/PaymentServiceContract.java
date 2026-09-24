@@ -33,7 +33,7 @@ import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
-/** Same behavioral assertions run on isolated H2 and on the real V1–V6 MySQL schema. */
+/** Same behavioral assertions run on isolated H2 and on the real Flyway V1–V9 MySQL schema. */
 abstract class PaymentServiceContract {
     protected abstract DataSource source() throws Exception;
     private GateJdbc db;
@@ -97,6 +97,176 @@ abstract class PaymentServiceContract {
         assertThat(db.queryForObject("SELECT COUNT(*) FROM et_payment_history WHERE payment_id=?", Integer.class, paid.id()))
                 .isEqualTo(2);
         verify(gateway, times(1)).createPayment(any());
+    }
+
+    @Test
+    void userFullRefundReusesOneIntentAndKeepsAllocatedInventory() {
+        var paid = payments.create(order.id(), 7, key);
+        var refunded = refunds.requestFullRefund(paid.id(), 7);
+        assertThat(refunded.status()).isEqualTo("SUCCEEDED");
+        assertThat(orders.order(order.id(), 7).status()).isEqualTo("REFUNDED");
+        assertThat(refunds.requestFullRefund(paid.id(), 7)).isEqualTo(refunded);
+        assertThat(db.queryForObject("SELECT COUNT(*) FROM et_refund WHERE payment_id=?", Integer.class,
+                paid.id())).isOne();
+        assertThat(db.queryForObject("SELECT amount FROM et_refund WHERE id=?", Long.class,
+                refunded.id())).isEqualTo(paid.amount());
+        assertThat(db.queryForObject("SELECT status FROM et_inventory_reservation WHERE order_id=?",
+                String.class, order.id())).isEqualTo("CONFIRMED");
+        assertInventory(0, 0, 1);
+        verify(gateway, times(1)).createRefund(any());
+    }
+
+    @Test
+    void userRefundUnknownRecoversByQueryAndCannotBeRequestedByAnotherUser() {
+        var paid = payments.create(order.id(), 7, key);
+        assertStatus(() -> refunds.requestFullRefund(paid.id(), 8), HttpStatus.NOT_FOUND);
+        faults.loseNextSuccessfulResponse(GatewayOperation.REFUND);
+        var unknown = refunds.requestFullRefund(paid.id(), 7);
+        assertThat(unknown.status()).isEqualTo("UNKNOWN");
+        assertThat(orders.order(order.id(), 7).status()).isEqualTo("REFUNDING");
+        assertThat(refunds.requestFullRefund(paid.id(), 7).id()).isEqualTo(unknown.id());
+        db.update("UPDATE et_refund SET next_attempt_at=? WHERE id=?",
+                Timestamp.from(Instant.now().minusSeconds(1)), unknown.id());
+        var claim = refunds.claimDueRecoveries(100).stream()
+                .filter(c -> c.refundId() == unknown.id()).findFirst().orElseThrow();
+        assertThat(refunds.recoverClaim(claim).status()).isEqualTo("SUCCEEDED");
+        assertThat(orders.order(order.id(), 7).status()).isEqualTo("REFUNDED");
+        assertInventory(0, 0, 1);
+        verify(gateway, times(1)).createRefund(any());
+    }
+
+    @Test
+    void reconciliationRepairsOnlyMissingLateRefundAndIsIdempotent() {
+        var reconciliation = new EventReconciliationService(db, manager);
+        doAnswer(call -> {
+            Object result = call.callRealMethod();
+            orders.cancel(order.id(), 7);
+            return result;
+        }).when(gateway).createPayment(any());
+        var late = payments.create(order.id(), 7, key);
+        long oldRefund = db.queryForObject("SELECT id FROM et_refund WHERE payment_id=?", Long.class, late.id());
+        db.update("DELETE FROM et_payment_history WHERE refund_id=?", oldRefund);
+        db.update("DELETE FROM et_refund WHERE id=?", oldRefund);
+        var before = reconciliation.scan(10);
+        assertThat((List<?>) before.get("paymentRefundConflict")).anySatisfy(row ->
+                assertThat(((java.util.Map<?, ?>) row).get("payment_id")).isEqualTo(late.id()));
+        long refundId = reconciliation.repairMissingLateRefund(late.id(), 1);
+        assertThat(reconciliation.repairMissingLateRefund(late.id(), 1)).isEqualTo(refundId);
+        assertThat((List<?>) reconciliation.scan(10).get("paymentRefundConflict")).noneSatisfy(row ->
+                assertThat(((java.util.Map<?, ?>) row).get("payment_id")).isEqualTo(late.id()));
+        assertThat(db.queryForObject("SELECT reason FROM et_refund WHERE id=?", String.class,
+                refundId)).isEqualTo("LATE_PAYMENT");
+        assertThat(db.queryForMap("SELECT actor_id,action FROM et_payment_history WHERE refund_id=?", refundId))
+                .containsEntry("actor_id", 1L).containsEntry("action", "RECONCILE_LATE_REFUND");
+        assertInventory(1, 0, 0);
+    }
+
+    @Test
+    void reconciliationRejectsClosedPaidOrderWhoseInventoryWasNeverReleased() {
+        var reconciliation = new EventReconciliationService(db, manager);
+        var paid = payments.create(order.id(), 7, key);
+        db.update("UPDATE et_order SET status='CLOSED' WHERE id=?", order.id());
+        assertStatus(() -> reconciliation.repairMissingLateRefund(paid.id(), 1), HttpStatus.CONFLICT);
+        assertThat(db.queryForObject("SELECT COUNT(*) FROM et_refund WHERE payment_id=?", Integer.class,
+                paid.id())).isZero();
+        assertInventory(0, 0, 1);
+        db.update("UPDATE et_order SET status='PAID' WHERE id=?", order.id());
+    }
+
+    @Test
+    void reconciliationFindsInjectedReservationUnknownAndOutboxButLeavesLegalCompensationAlone() {
+        var reconciliation = new EventReconciliationService(db, manager);
+        doAnswer(call -> {
+            Object result = call.callRealMethod();
+            orders.cancel(order.id(), 7);
+            return result;
+        }).when(gateway).createPayment(any());
+        var late = payments.create(order.id(), 7, key);
+        assertThat((List<?>) reconciliation.scan(10).get("paymentRefundConflict")).noneSatisfy(row ->
+                assertThat(((java.util.Map<?, ?>) row).get("payment_id")).isEqualTo(late.id()));
+        assertThat((List<?>) reconciliation.scan(10).get("closedWithReservation")).noneSatisfy(row ->
+                assertThat(((java.util.Map<?, ?>) row).get("order_id")).isEqualTo(order.id()));
+
+        db.update("UPDATE et_refund SET amount=amount-1 WHERE payment_id=?", late.id());
+        assertThat((List<?>) reconciliation.scan(10).get("paymentRefundConflict")).anySatisfy(row ->
+                assertThat(((java.util.Map<?, ?>) row).get("payment_id")).isEqualTo(late.id()));
+        db.update("UPDATE et_refund SET amount=amount+1 WHERE payment_id=?", late.id());
+
+        db.update("UPDATE et_payment SET status='FAILED' WHERE id=?", late.id());
+        assertThat((List<?>) reconciliation.scan(10).get("paymentRefundConflict")).anySatisfy(row ->
+                assertThat(((java.util.Map<?, ?>) row).get("payment_id")).isEqualTo(late.id()));
+        db.update("UPDATE et_payment SET status='SUCCEEDED' WHERE id=?", late.id());
+
+        db.update("UPDATE et_inventory_reservation SET status='RESERVED' WHERE order_id=?", order.id());
+        db.update("UPDATE et_refund SET status='UNKNOWN',updated_at=? WHERE payment_id=?",
+                Timestamp.from(Instant.now().minusSeconds(1800)), late.id());
+        db.update("UPDATE et_outbox_event SET publish_status='PENDING',next_attempt_at=?,updated_at=? "
+                        + "WHERE event_id=?", Timestamp.from(Instant.now().minusSeconds(1800)),
+                Timestamp.from(Instant.now().minusSeconds(1800)), "ORDER_CLOSED:" + order.id());
+        var findings = reconciliation.scan(10);
+        assertThat((List<?>) findings.get("closedWithReservation")).anySatisfy(row ->
+                assertThat(((java.util.Map<?, ?>) row).get("order_id")).isEqualTo(order.id()));
+        assertThat((List<?>) findings.get("longUnknown")).anySatisfy(row ->
+                assertThat(((java.util.Map<?, ?>) row).get("kind")).isEqualTo("REFUND"));
+        assertThat((List<?>) findings.get("stalledOutbox")).anySatisfy(row ->
+                assertThat(((java.util.Map<?, ?>) row).get("event_id")).isEqualTo("ORDER_CLOSED:" + order.id()));
+        assertThat((List<?>) findings.get("paymentRefundConflict")).noneSatisfy(row ->
+                assertThat(((java.util.Map<?, ?>) row).get("payment_id")).isEqualTo(late.id()));
+
+        db.update("UPDATE et_payment SET status='UNKNOWN',updated_at=? WHERE id=?",
+                Timestamp.from(Instant.now().minusSeconds(1800)), late.id());
+        @SuppressWarnings("unchecked")
+        var firstPage = (List<java.util.Map<String, Object>>) reconciliation
+                .scan(1, 0, 0, late.id() - 1, "", "").get("longUnknown");
+        assertThat(firstPage).hasSize(1);
+        long afterId = ((Number) firstPage.getFirst().get("id")).longValue();
+        String afterKind = String.valueOf(firstPage.getFirst().get("kind"));
+        @SuppressWarnings("unchecked")
+        var secondPage = (List<java.util.Map<String, Object>>) reconciliation
+                .scan(1, 0, 0, afterId, afterKind, "").get("longUnknown");
+        assertThat(secondPage).hasSize(1);
+        assertThat(secondPage.getFirst()).isNotEqualTo(firstPage.getFirst());
+
+        db.update("UPDATE et_payment SET status='SUCCEEDED' WHERE id=?", late.id());
+        db.update("UPDATE et_refund SET status='REQUESTED',updated_at=CURRENT_TIMESTAMP WHERE payment_id=?", late.id());
+        db.update("UPDATE et_inventory_reservation SET status='RELEASED' WHERE order_id=?", order.id());
+        db.update("UPDATE et_outbox_event SET next_attempt_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP "
+                + "WHERE event_id=?", "ORDER_CLOSED:" + order.id());
+    }
+
+    @Test
+    void reconciliationRepairCannotOverwritePaymentThatWinsTheOrderLock() throws Exception {
+        var reconciliation = new EventReconciliationService(db, manager);
+        faults.loseNextSuccessfulResponse(GatewayOperation.PAYMENT);
+        var unknown = payments.create(order.id(), 7, key);
+        CountDownLatch paymentLocked = new CountDownLatch(1);
+        CountDownLatch repairReachedOrderLock = new CountDownLatch(1);
+        CountDownLatch releasePayment = new CountDownLatch(1);
+        db.afterOrderLock.set(() -> {
+            paymentLocked.countDown();
+            await(releasePayment);
+        });
+        db.beforeReconciliationOrderLock.set(repairReachedOrderLock::countDown);
+        var pool = Executors.newFixedThreadPool(2);
+        try {
+            var paymentResult = pool.submit(() -> payments.refresh(unknown.id(), 7));
+            await(paymentLocked);
+            var attemptedRepair = pool.submit(() -> {
+                assertStatus(() -> reconciliation.repairMissingLateRefund(unknown.id(), 1), HttpStatus.CONFLICT);
+            });
+            await(repairReachedOrderLock);
+            releasePayment.countDown();
+            assertThat(paymentResult.get(10, TimeUnit.SECONDS).status()).isEqualTo("SUCCEEDED");
+            attemptedRepair.get(10, TimeUnit.SECONDS);
+            assertThat(db.queryForObject("SELECT COUNT(*) FROM et_refund WHERE payment_id=?",
+                    Integer.class, unknown.id())).isZero();
+            assertPaid();
+        } finally {
+            releasePayment.countDown();
+            db.afterOrderLock.set(null);
+            db.beforeReconciliationOrderLock.set(null);
+            pool.shutdownNow();
+        }
     }
 
     @Test
@@ -708,12 +878,22 @@ abstract class PaymentServiceContract {
     /** Test-only hooks execute after real JDBC calls, while the real transaction retains its locks. */
     private static final class GateJdbc extends JdbcTemplate {
         final AtomicReference<Runnable> afterOrderLock = new AtomicReference<>();
+        final AtomicReference<Runnable> beforeReconciliationOrderLock = new AtomicReference<>();
         final AtomicReference<Runnable> afterCandidates = new AtomicReference<>();
         final AtomicReference<Runnable> afterRecoveryCandidates = new AtomicReference<>();
         final AtomicReference<Runnable> afterRefundRecoveryCandidates = new AtomicReference<>();
         boolean failResultHistory;
 
         GateJdbc(DataSource source) { super(source); }
+
+        @Override
+        public <T> T queryForObject(String sql, Class<T> requiredType, Object... args) {
+            if (sql.contains("SELECT status FROM et_order WHERE id=? FOR UPDATE")) {
+                Runnable hook = beforeReconciliationOrderLock.getAndSet(null);
+                if (hook != null) hook.run();
+            }
+            return super.queryForObject(sql, requiredType, args);
+        }
 
         @Override
         public <T> T queryForObject(String sql, RowMapper<T> mapper, Object... args) {

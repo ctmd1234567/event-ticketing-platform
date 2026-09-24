@@ -42,11 +42,13 @@ class PaymentControllerTest {
         mvc.perform(post("/api/v1/payments/12/refresh")).andExpect(status().isOk());
         mvc.perform(get("/api/v1/refunds/13")).andExpect(status().isOk());
         mvc.perform(post("/api/v1/refunds/13/refresh")).andExpect(status().isOk());
+        mvc.perform(post("/api/v1/payments/12/refunds")).andExpect(status().isOk());
 
         verify(payments).create(11L, 42L, "1234567890abcdef");
         verify(payments).payment(12L, 42L);
         verify(payments).refresh(12L, 42L);
         verify(refunds).refund(13L, 42L);
         verify(refunds).refresh(13L, 42L);
+        verify(refunds).requestFullRefund(12L, 42L);
     }
 }
