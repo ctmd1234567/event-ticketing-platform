@@ -131,7 +131,8 @@ public class EventNotificationRedriveService {
         }
         int claimed = db.update("""
                 UPDATE et_notification_failure SET status='REDRIVING',lease_until=?
-                WHERE event_id=? AND (status='FAILED' OR (status='REDRIVING' AND lease_until<CURRENT_TIMESTAMP))
+                WHERE event_id=? AND (status IN ('FAILED','REDRIVEN')
+                    OR (status='REDRIVING' AND lease_until<CURRENT_TIMESTAMP))
                 """, Timestamp.from(Instant.now().plusSeconds(60)), eventId);
         if (claimed != 1) throw new IllegalStateException("Failure is already being redriven or completed");
         db.update("""
