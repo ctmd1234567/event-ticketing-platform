@@ -1,0 +1,10 @@
+tier_id	capacity	available	reserved	allocated	orders	pending_orders	reservations	reserved_reservations	conserved	nonnegative	order_reservation_match	unique_buyers
+9900251203	5000	3684	1316	0	1316	1316	1316	1316	1	1	1	1
+9900251204	5000	5000	0	0	0	0	0	0	1	1	1	1
+9900251205	5000	5000	0	0	0	0	0	0	1	1	1	1
+legacy_requests
+34092
+legacy_orders
+34092
+legacy_outbox
+34092

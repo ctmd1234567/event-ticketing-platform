@@ -1,0 +1,18 @@
+2026-09-25 Asia/Shanghai, Windows IDEA 2026.1.3 / Java 21.0.7, MySQL 8.4.
+App: com.eventplatform.EventTradingPlatformApplication, local project.
+Each restart returned /actuator/health = UP, HTTP 200. Only isolated test fixtures below were changed.
+
+1) Expiry scanner and V10 archive migration
+Before restart: test order 2103159021258973186, PENDING_PAYMENT, payment_deadline 2026-09-24 16:33:13 UTC (set expired during downtime).
+After restart: order CLOSED; tier 9900130003 capacity 10, available 10, reserved 0, allocated 0.
+Flyway: V10 archive legacy voucher tables, success=1. archive_legacy_voucher_order rows=34092.
+
+2) Expired Outbox publication lease
+Before restart (SQL fault injection on the same isolated order's notification): ORDER_CLOSED:2103159021258973186, PROCESSING, attempts=1, lease_token=v2-restart-fixture, lease_until=2026-09-24 16:36:22 UTC (expired).
+After restart: PUBLISHED, attempts=2, lease_token=NULL, lease_until=NULL; matching et_notification rows=1.
+
+3) UNKNOWN payment with committed simulated gateway fact
+Before restart (SQL fault injection using a new isolated order): order 2103162041812213762 PENDING_PAYMENT; et_payment 9900131009 UNKNOWN/AUTO, attempts=1, next_attempt_at=2026-09-24 16:38:30 UTC (due); sim_gateway_payment EP9900131009 SUCCEEDED.
+After restart: et_payment SUCCEEDED/NONE, attempts=2, provider_transaction_id=test-provider-9900131009, lease_token=NULL; order PAID; tier 9900131003 capacity 10, available 9, reserved 0, allocated 1; ORDER_PAID event PUBLISHED and matching et_notification rows=1.
+
+Limits: items 2 and 3 use controlled persistent SQL fault injection plus real JVM restarts, not naturally occurring crashes. The payment gateway is the project's persisted simulated provider.

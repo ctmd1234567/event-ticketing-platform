@@ -3,9 +3,9 @@ server:
   shutdown: graceful
   tomcat:
     threads:
-      max: ${TOMCAT_MAX_THREADS:300}
+      max: ${TOMCAT_MAX_THREADS:128}
       min-spare: ${TOMCAT_MIN_SPARE_THREADS:20}
-    accept-count: ${TOMCAT_ACCEPT_COUNT:2000}
+    accept-count: ${TOMCAT_ACCEPT_COUNT:256}
     max-connections: ${TOMCAT_MAX_CONNECTIONS:10000}
     connection-timeout: 5s
 spring:
@@ -92,6 +92,7 @@ logging:
 app:
   event-orders:
     payment-window-seconds: ${EVENT_ORDER_PAYMENT_WINDOW_SECONDS:900}
+    max-in-flight: ${EVENT_ORDER_MAX_IN_FLIGHT:48}
     expiry-scan-enabled: ${EVENT_ORDER_EXPIRY_SCAN_ENABLED:true}
     expiry-scan-interval-ms: ${EVENT_ORDER_EXPIRY_SCAN_INTERVAL_MS:1000}
     expiry-scan-batch-size: ${EVENT_ORDER_EXPIRY_SCAN_BATCH_SIZE:200}

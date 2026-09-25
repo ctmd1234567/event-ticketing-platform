@@ -1,0 +1,15 @@
+event_notifications_outbox_oldest_seconds{application="event-trading-platform"} 0.0
+event_notifications_outbox_pending{application="event-trading-platform"} 0.0
+event_orders_persisted{application="event-trading-platform"} 4786.0
+hikaricp_connections_active{application="event-trading-platform",pool="HikariPool-1"} 0.0
+hikaricp_connections_pending{application="event-trading-platform",pool="HikariPool-1"} 0.0
+http_server_requests_seconds_count{application="event-trading-platform",error="none",exception="none",method="POST",outcome="CLIENT_ERROR",status="401",uri="/api/v1/orders"} 1
+http_server_requests_seconds_count{application="event-trading-platform",error="none",exception="none",method="POST",outcome="CLIENT_ERROR",status="409",uri="/api/v1/orders"} 479
+http_server_requests_seconds_count{application="event-trading-platform",error="none",exception="none",method="POST",outcome="SERVER_ERROR",status="503",uri="/api/v1/orders"} 2
+http_server_requests_seconds_count{application="event-trading-platform",error="none",exception="none",method="POST",outcome="SUCCESS",status="200",uri="/api/v1/orders"} 4676
+jvm_memory_used_bytes{application="event-trading-platform",area="heap",id="G1 Eden Space"} 3.3554432E7
+jvm_memory_used_bytes{application="event-trading-platform",area="heap",id="G1 Old Gen"} 4.2318944E7
+jvm_memory_used_bytes{application="event-trading-platform",area="heap",id="G1 Survivor Space"} 8270288.0
+jvm_memory_used_bytes{application="event-trading-platform",area="nonheap",id="CodeCache"} 2.1610624E7
+jvm_memory_used_bytes{application="event-trading-platform",area="nonheap",id="Compressed Class Space"} 1.0958824E7
+jvm_memory_used_bytes{application="event-trading-platform",area="nonheap",id="Metaspace"} 7.9725088E7

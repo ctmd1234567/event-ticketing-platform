@@ -2,53 +2,39 @@
 
 ## Purpose
 
-This document defines the target business model for the event trading platform. It is the source of truth for module ownership, aggregate boundaries, terminology, and business invariants. Database migrations and application code must follow this model unless an Architecture Decision Record explicitly changes it.
+This document describes the implemented Event Ticketing Platform business model and its transaction invariants. The current code and migrations govern executable details.
 
-## Frozen V1 Boundary
+## Business boundary
 
 - One order contains one ticket tier and exactly one ticket. The only currency is `CNY`, and money uses integer fen.
 - Capacity cannot change after publication. Inventory is `available + reserved + allocated = capacity`, and every counter is nonnegative.
 - A separate `InventoryReservation` record is the reservation fact; order status does not duplicate reservation state.
-- The V1 purchase limit is one order per user and ticket tier. A retry with the same idempotency key returns the original result; a different key is rejected, including after cancellation.
-- V1 has no user-initiated refund. A late confirmed charge after local closure creates one full compensating refund and never changes inventory again. V2 may add user-initiated full refunds, which also do not return allocated inventory to sale. Partial refunds are out of scope.
+- The purchase limit is one order per user and ticket tier. A retry with the same idempotency key returns the original result; a different key is rejected, including after cancellation.
+- A late confirmed charge after local closure creates one full compensating refund. A paid user can request one full refund. Neither path returns allocated inventory to sale. Partial refunds are unsupported.
 - Core ordering is synchronous. RabbitMQ is retained for non-core notification work and is not required to commit an order.
 
-## V1 Local Transaction Boundaries
+## Local transaction boundaries
 
 1. Place order: lock and validate the ticket tier, move one unit from `available` to `reserved`, create the order, and create its `RESERVED` reservation in one MySQL transaction.
 2. Close order: conditionally move a `PENDING_PAYMENT` order to `CLOSED`, move its reservation from `RESERVED` to `RELEASED`, and return one unit from `reserved` to `available` in one MySQL transaction.
 3. Confirm normal payment: persist the trusted payment result, conditionally move the order to `PAID`, move its reservation from `RESERVED` to `CONFIRMED`, and move one unit from `reserved` to `allocated` in one MySQL transaction.
 
-When an Outbox event is introduced for one of these changes, its publication intent is inserted in that same transaction. Gateway charge/refund execution remains outside these local database transactions; a transport timeout is `UNKNOWN`, never proof of failure.
+Payment confirmation and order closure insert their notification Outbox intent in the same transaction. Gateway charge/refund execution remains outside these local database transactions; a transport timeout is `UNKNOWN`, never proof of failure.
 
 ## Architecture Style
 
-The application remains a modular monolith. Modules communicate through application services and domain events while sharing one MySQL database. Redis is an acceleration and traffic-control layer, not a transactional source of truth. RabbitMQ provides asynchronous delivery, and the Transactional Outbox guarantees that business changes and outgoing events are committed together.
+The application remains a modular monolith. Modules communicate through application services while sharing one MySQL database. Redis is an acceleration and traffic-control layer, not a transactional source of truth. RabbitMQ provides asynchronous delivery, and the Transactional Outbox guarantees that business changes and outgoing events are committed together.
 
-Each business module uses the following internal structure when complexity requires it:
+## Module ownership
 
-```text
-module/
-├─ api/             HTTP controllers and request/response models
-├─ application/     use cases and transaction boundaries
-├─ domain/          aggregates, value objects, policies, and repository ports
-└─ infrastructure/  MyBatis repositories, external clients, and messaging adapters
-```
-
-Do not create empty layers or interfaces only to satisfy this layout.
-
-## Bounded Contexts
-
-| Context | Owns | Responsibilities |
+| Area | Main records | Responsibility |
 |---|---|---|
-| Identity | User, Role, AccessToken | Authentication, authorization, token revocation |
-| Event Catalog | Event, EventSession, TicketTier | Event authoring, publication, sales windows, public catalog |
-| Inventory | Inventory, InventoryReservation | Atomic reservation, confirmation, release, reconciliation |
-| Ordering | Order, OrderItem | Idempotent order creation, pricing snapshot, order lifecycle |
-| Payment | Payment, Refund | Payment attempts, signed callbacks, cancellation, refunds |
-| Messaging | OutboxEvent, InboxMessage | Durable event publication and consumer deduplication |
-| Notification | NotificationEvent, SubscriptionCursor | SSE delivery, reconnect, replay, duplicate suppression |
-| Operations | AuditLog, ReconciliationRun | Failure inspection, retry, redrive, reconciliation, operator audit |
+| Identity | User and Redis session | Authentication and authorization |
+| Catalog | Event, EventSession, TicketTier | Publication and sales windows |
+| Inventory and order | Inventory, reservation, order | Synchronous reservation, close and allocation |
+| Payment | Payment, Refund, callback history | Gateway result and recovery |
+| Notification | Outbox event, notification, failure/redrive record | Durable intent and in-app effect |
+| Operations | Payment history and reconciliation result | Audited recovery and targeted review |
 
 ## Core Aggregates
 
@@ -135,8 +121,8 @@ Key fields: `id`, `orderNumber`, `userId`, `eventId`, `sessionId`, `status`, `to
 Rules:
 
 - `(userId, idempotencyKey)` is unique.
-- An order has exactly one item with quantity `1` in V1.
-- `(userId, ticketTierId)` is unique in V1; cancellation does not restore purchase eligibility.
+- An order has exactly one item with quantity `1`.
+- `(userId, ticketTierId)` is unique; cancellation does not restore purchase eligibility.
 - A repeated create request with the same key and payload returns the original order.
 - Reusing a key with a different payload is rejected.
 - Order prices are immutable snapshots.
@@ -157,7 +143,7 @@ Rules:
 
 ### Refund
 
-A refund records one full reversal of a successful payment. V1 creates refunds only for late-payment compensation; V2 may expose a user-initiated full-refund command.
+A refund records one full reversal of a successful payment, requested by the user or created to compensate a late charge.
 
 Key fields: `id`, `refundNumber`, `orderId`, `paymentId`, `amount`, `reason`, `status`, `idempotencyKey`, `providerRefundId`, `requestedBy`, `createdAt`, `updatedAt`, `succeededAt`.
 
@@ -165,63 +151,20 @@ Rules:
 
 - The refund amount equals the successful payment amount; partial refunds are unsupported.
 - `(paymentId, idempotencyKey)` is unique.
-- Refund success never changes inventory in the fixed V1/V2 policy.
+- Refund success never changes inventory in the current policy.
 
-## Supporting Records
+## Supporting records
 
-### OutboxEvent
+`et_outbox_event` persists a stable event ID, type, order association, payload, publish status, attempts, next attempt and lease. `et_notification.event_id` is unique, so redelivery cannot create a second in-app notification. `et_notification_failure` retains poison or exhausted delivery details; `et_notification_redrive` records operator decisions. Payment history and callback receipts retain their respective audit facts. The implementation does not use a generic Inbox table or generic audit subsystem.
 
-Required fields: `id`, `aggregateType`, `aggregateId`, `eventType`, `eventVersion`, `payload`, `traceId`, `status`, `attemptCount`, `nextAttemptAt`, `leasedUntil`, `lastError`, `createdAt`, `publishedAt`.
+The emitted notification types are `ORDER_PAID` and `ORDER_CLOSED`. Other domain changes remain synchronous MySQL state transitions.
 
-### InboxMessage
-
-Required fields: `consumerName`, `messageId`, `eventType`, `payloadHash`, `status`, `receivedAt`, `processedAt`, `lastError`.
-
-`(consumerName, messageId)` is unique and is the consumer idempotency boundary.
-
-### AuditLog
-
-Every sensitive administrative action records the actor, action, target, request trace, before/after summary, result, IP address, and timestamp. Audit records are append-only.
-
-## Initial Domain Events
-
-- `EventPublished`
-- `EventTakenOffSale`
-- `InventoryReserved`
-- `InventoryReservationConfirmed`
-- `InventoryReservationReleased`
-- `OrderCreated`
-- `OrderPaid`
-- `OrderCanceled`
-- `OrderExpired`
-- `PaymentSucceeded`
-- `PaymentFailed`
-- `RefundRequested`
-- `RefundSucceeded`
-- `RefundFailed`
-- `OrderRefunded`
-
-Event names describe completed facts. Payloads carry identifiers and immutable facts, not database entities.
-
-## Cross-Module Rules
+## Cross-module rules
 
 1. MySQL is authoritative for orders, payments, refunds, and inventory.
-2. Every externally retried command has an idempotency boundary.
-3. Every asynchronous consumer assumes at-least-once delivery.
-4. Business state and its outgoing event are committed in one transaction.
-5. A module does not update another module's tables outside an explicitly documented transaction use case.
-6. Money comparisons include amount and currency.
-7. Timestamps are persisted in UTC and rendered in the client's time zone.
-8. IDs are opaque to clients; business numbers are separate from primary keys.
-
-## Legacy Migration Map
-
-| Legacy model | Target model | Removal condition |
-|---|---|---|
-| `Voucher` | `TicketTier` | Public catalog and order creation use ticket tiers |
-| `SeckillVoucher` | `Inventory` | Reservation and release are implemented and reconciled |
-| `VoucherOrder` | `Order`, `OrderItem`, `InventoryReservation` | The new state machine passes concurrency and migration tests |
-| Shop review features | Removed | The event catalog provides all required demonstration data |
-| Follow, feed, and sign-in features | Removed | No target API, test, or documentation depends on them |
-
-Legacy tables and code are removed only after the replacement vertical slice is operational. They must not receive new features.
+2. Retried order and payment commands retain stable identity and request binding.
+3. Notification delivery assumes duplicates; the consumer commits its effect before ACK.
+4. Relevant business state and notification intent commit in one transaction.
+5. Money comparisons include amount and currency.
+6. Gateway charge and refund transactions are independent of the local order result transaction.
+7. A trusted success after closure creates one compensation refund; it never revives the order.

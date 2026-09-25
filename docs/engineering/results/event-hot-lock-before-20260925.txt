@@ -1,0 +1,7 @@
+Variable_name	Value
+Com_update	3810
+Innodb_row_lock_time	59374
+Innodb_row_lock_waits	1108
+Innodb_rows_updated	2316
+NAME	COUNT
+lock_deadlocks	0

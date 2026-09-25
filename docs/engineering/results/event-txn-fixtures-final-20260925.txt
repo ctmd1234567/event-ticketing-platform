@@ -1,0 +1,12 @@
+orders	closed_orders
+2253	2253
+published
+2253
+notifications
+2253
+id	capacity	available	reserved	allocated	conserved
+9900132003	1000	1000	0	0	1
+9900133003	1000	1000	0	0	1
+9900133004	1000	1000	0	0	1
+9900133005	1000	1000	0	0	1
+9900134003	1000	1000	0	0	1

@@ -1,0 +1,9 @@
+Selected application log exception causes during the 250–300/s runs; source local IDEA log is not published.
+Caused by: java.sql.SQLTransientConnectionException: HikariPool-1 - Connection is not available, request timed out after 3002ms (total=32, active=32, idle=0, waiting=268)
+Caused by: java.sql.SQLTransientConnectionException: HikariPool-1 - Connection is not available, request timed out after 3012ms (total=32, active=32, idle=0, waiting=268)
+Caused by: java.sql.SQLTransientConnectionException: HikariPool-1 - Connection is not available, request timed out after 3011ms (total=32, active=32, idle=0, waiting=267)
+Caused by: java.sql.SQLTransientConnectionException: HikariPool-1 - Connection is not available, request timed out after 3010ms (total=32, active=32, idle=0, waiting=268)
+Caused by: java.sql.SQLTransientConnectionException: HikariPool-1 - Connection is not available, request timed out after 3012ms (total=32, active=32, idle=0, waiting=267)
+Caused by: java.sql.SQLTransientConnectionException: HikariPool-1 - Connection is not available, request timed out after 3008ms (total=32, active=32, idle=0, waiting=267)
+Caused by: java.sql.SQLTransientConnectionException: HikariPool-1 - Connection is not available, request timed out after 3004ms (total=32, active=32, idle=0, waiting=268)
+Caused by: java.sql.SQLTransientConnectionException: HikariPool-1 - Connection is not available, request timed out after 3012ms (total=32, active=32, idle=0, waiting=267)

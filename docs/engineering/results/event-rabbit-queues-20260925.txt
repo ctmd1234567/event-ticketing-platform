@@ -1,0 +1,8 @@
+Timeout: 60.0 seconds ...
+Listing queues for vhost / ...
+name	messages	messages_ready	messages_unacknowledged
+event-trading.notifications.dlq.v2	0	0	0
+event-trading.notifications.v1	0	0	0
+event-trading.notifications.v2	0	0	0
+event-trading.orders.v1	0	0	0
+event-trading.orders.v1.failed	0	0	0

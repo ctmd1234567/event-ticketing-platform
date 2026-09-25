@@ -1,0 +1,3 @@
+2026-09-25T00:11:43.745+08:00  INFO [requestId:54a3fdbe-e5c9-4b89-9ed0-0e87de1fe55a] 32928 --- [event-trading-platform] [nio-8081-exec-1] c.eventplatform.order.EventOrderService  : Created Event order 2103155429282193410
+2026-09-25T00:11:44.077+08:00  INFO [requestId:a6ec37d2-454d-4c56-967f-cd38de2c5512] 32928 --- [event-trading-platform] [nio-8081-exec-2] c.eventplatform.order.EventOrderService  : Created Event order 2103155430649536514
+2026-09-25T00:12:23.811+08:00  INFO [requestId:07482e98-03f5-4d76-8038-e84949ffa2a8] 32928 --- [event-trading-platform] [nio-8081-exec-3] c.eventplatform.order.EventOrderService  : Created Event order 2103155597314400258

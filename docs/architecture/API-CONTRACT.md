@@ -2,7 +2,7 @@
 
 Updated: 2026-09-23
 
-This document describes the V1 transaction API and the V2 notification, full-refund, and focused reconciliation endpoints.
+This document describes the current transaction, notification, full-refund, and focused reconciliation endpoints.
 
 ## Conventions
 
@@ -11,7 +11,7 @@ This document describes the V1 transaction API and the V2 notification, full-ref
 - Authentication: `Authorization: Bearer <token>`
 - Command idempotency header where listed: `Idempotency-Key`
 - Timestamps: ISO-8601 UTC
-- Money: integer fen and ISO currency; V1 uses CNY
+- Money: integer fen and ISO currency; the current product uses CNY
 
 ## Actual response envelope
 
@@ -37,7 +37,7 @@ Failure:
 }
 ```
 
-Null fields may be omitted by Jackson configuration. The current API does not expose a stable machine error-code field or response `traceId`; clients must not assume the planned envelope from older design drafts.
+Null fields may be omitted by Jackson configuration. The current API does not expose a stable machine error-code field or response `traceId`; clients should use the documented envelope.
 
 ## Authentication and identity
 
@@ -66,7 +66,7 @@ All routes below require ADMIN:
 - `POST /api/v1/admin/events/{eventId}/publish`
 - `POST /api/v1/admin/events/{eventId}/take-off-sale`
 
-Create-order price and currency always come from the ticket tier. V1 accepts one ticket and CNY.
+Create-order price and currency always come from the ticket tier. Orders contain one ticket and use CNY.
 
 ## Owned order API
 
@@ -95,7 +95,7 @@ Create request:
 - `GET /api/v1/refunds/{refundId}`
 - `POST /api/v1/refunds/{refundId}/refresh`
 
-V1 has one logical payment per order. Replays reuse the same payment number. Transport timeout/reset becomes `UNKNOWN`, not `FAILED`. Refresh queries trusted provider state and may converge the local record.
+There is one logical payment per order. Replays reuse the same payment number. Transport timeout/reset becomes `UNKNOWN`, not `FAILED`. Refresh queries trusted provider state and may converge the local record.
 
 The full-refund request accepts a `PAID` or `FULFILLED` order with a successful payment and confirmed reservation. It atomically records one refund intent and moves the order to `REFUNDING`; provider submission runs after commit through the existing refund recovery path. A repeated request returns that refund. A successful result moves the order to `REFUNDED`; a failed or unknown result remains queryable and follows the existing recovery and audited retry routes. Refund amount equals the paid amount, with one refund per payment. Allocated inventory remains allocated.
 
@@ -137,12 +137,8 @@ Reconciliation findings require operator review except for the missing late-refu
 
 ## HTTP status behavior
 
-The current controllers use standard Spring status exceptions for validation, authentication/authorization, missing resources, business conflicts, rate/overload rejection, and internal errors. Common statuses are 400, 401, 403, 404, 409, 429, and 500. Successful creates currently return the normal `Result.ok(...)` response rather than a guaranteed HTTP 201. No client should rely on unimplemented 202/422/503 policies from earlier target designs.
+The current controllers use standard Spring status exceptions for validation, authentication/authorization, missing resources, business conflicts, rate/overload rejection, and internal errors. Common statuses are 400, 401, 403, 404, 409, 429, and 500. Successful creates currently return the normal `Result.ok(...)` response rather than a guaranteed HTTP 201. Clients should rely on the currently observed controller behavior and not infer unimplemented status policies.
 
 ## Ownership and versioning
 
 Users access only their own orders, payments, and refunds. Another user's resource is reported as absent. ADMIN functions use dedicated `/api/v1/admin/**` routes. Breaking HTTP changes require a new API version; additive fields may appear in the existing envelope.
-
-## Optional legacy experiment
-
-When the explicit `legacy-experiment` profile is active, authenticated `/voucher-order/**` endpoints exist only to reproduce a historical JDBC/Outbox/RabbitMQ engineering experiment. They are not part of the Event product contract and must not be added to the product request collection.

@@ -9,6 +9,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.http.HttpStatus;
+import org.springframework.jdbc.core.ConnectionCallback;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -22,6 +23,7 @@ import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.concurrent.Semaphore;
 
 @Service
 public class EventOrderService {
@@ -34,16 +36,24 @@ public class EventOrderService {
     private final TransactionTemplate transactions;
     private final Duration paymentWindow;
     private final Duration expiryFailureRetry;
+    private final String tierLockClause;
+    private final Semaphore createPermits;
 
     public EventOrderService(JdbcTemplate db, PlatformTransactionManager transactionManager,
             EventNotificationOutbox notificationOutbox,
             @Value("${app.event-orders.payment-window-seconds:900}") long paymentWindowSeconds,
-            @Value("${app.event-orders.expiry-failure-retry-seconds:30}") long expiryFailureRetrySeconds) {
+            @Value("${app.event-orders.expiry-failure-retry-seconds:30}") long expiryFailureRetrySeconds,
+            @Value("${app.event-orders.max-in-flight:48}") int maxInFlight) {
         this.db = db;
         this.notificationOutbox = notificationOutbox;
         this.transactions = new TransactionTemplate(transactionManager);
         this.paymentWindow = Duration.ofSeconds(Math.max(1, paymentWindowSeconds));
         this.expiryFailureRetry = Duration.ofSeconds(Math.max(1, expiryFailureRetrySeconds));
+        Boolean mysql = db.execute((ConnectionCallback<Boolean>) connection ->
+                "MySQL".equals(connection.getMetaData().getDatabaseProductName()));
+        this.tierLockClause = Boolean.TRUE.equals(mysql)
+                ? "FOR SHARE OF e,s FOR UPDATE OF t" : "FOR UPDATE";
+        this.createPermits = new Semaphore(Math.max(1, maxInFlight));
     }
 
     public OrderView create(long userId, String idempotencyKey, long ticketTierId, int quantity) {
@@ -54,29 +64,37 @@ public class EventOrderService {
         if (quantity != 1) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "V1 order quantity must be 1");
         }
-        String requestHash = ticketTierId + ":" + quantity;
-        OrderView existing = findByKey(userId, idempotencyKey);
-        if (existing != null) {
-            log.info("Replayed Event order {}", existing.id());
-            return replay(existing, requestHash);
+        if (!createPermits.tryAcquire()) {
+            throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS,
+                    "Event order creation is overloaded");
         }
-
         try {
-            OrderView created = transactions.execute(status -> createNew(
-                    userId, idempotencyKey, requestHash, ticketTierId, quantity));
-            if (created == null) {
-                throw new IllegalStateException("Order transaction returned no result");
-            }
-            log.info("Created Event order {}", created.id());
-            return created;
-        } catch (DuplicateKeyException duplicate) {
-            existing = findByKey(userId, idempotencyKey);
+            String requestHash = ticketTierId + ":" + quantity;
+            OrderView existing = findByKey(userId, idempotencyKey);
             if (existing != null) {
-                log.info("Replayed Event order {} after duplicate key", existing.id());
+                log.info("Replayed Event order {}", existing.id());
                 return replay(existing, requestHash);
             }
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "V1 purchase limit already reached for this ticket tier", duplicate);
+
+            try {
+                OrderView created = transactions.execute(status -> createNew(
+                        userId, idempotencyKey, requestHash, ticketTierId, quantity));
+                if (created == null) {
+                    throw new IllegalStateException("Order transaction returned no result");
+                }
+                log.info("Created Event order {}", created.id());
+                return created;
+            } catch (DuplicateKeyException duplicate) {
+                existing = findByKey(userId, idempotencyKey);
+                if (existing != null) {
+                    log.info("Replayed Event order {} after duplicate key", existing.id());
+                    return replay(existing, requestHash);
+                }
+                throw new ResponseStatusException(HttpStatus.CONFLICT,
+                        "V1 purchase limit already reached for this ticket tier", duplicate);
+            }
+        } finally {
+            createPermits.release();
         }
     }
 
@@ -112,16 +130,18 @@ public class EventOrderService {
         db.update("""
             INSERT INTO et_order(
                 id,order_number,user_id,event_id,session_id,ticket_tier_id,quantity,
-                unit_price,total_amount,currency,status,idempotency_key,request_hash,payment_deadline)
-            VALUES (?,?,?,?,?,?,?,?,?,?,'PENDING_PAYMENT',?,?,?)
+                unit_price,total_amount,currency,status,idempotency_key,request_hash,payment_deadline,created_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,'PENDING_PAYMENT',?,?,?,?)
             """, orderId, orderNumber, userId, tier.eventId(), tier.sessionId(), ticketTierId,
                 quantity, tier.unitPrice(), totalAmount, tier.currency(), idempotencyKey,
-                requestHash, Timestamp.from(paymentDeadline));
+                requestHash, Timestamp.from(paymentDeadline), Timestamp.from(now));
         db.update("""
             INSERT INTO et_inventory_reservation(id,order_id,ticket_tier_id,quantity,status)
             VALUES (?,?,?,?,'RESERVED')
             """, IdWorker.getId(), orderId, ticketTierId, quantity);
-        return order(orderId, userId);
+        return new OrderView(orderId, orderNumber, userId, tier.eventId(), tier.sessionId(),
+                ticketTierId, quantity, tier.unitPrice(), totalAmount, tier.currency(),
+                "PENDING_PAYMENT", idempotencyKey, requestHash, paymentDeadline, null, now);
     }
 
     @Transactional(readOnly = true)
@@ -306,8 +326,8 @@ public class EventOrderService {
                 FROM et_ticket_tier t
                 JOIN et_event_session s ON s.id=t.session_id
                 JOIN et_event e ON e.id=s.event_id
-                WHERE t.id=? FOR UPDATE
-                """, (rs, row) -> new SellableTier(
+                WHERE t.id=?
+                """ + tierLockClause, (rs, row) -> new SellableTier(
                     rs.getLong("event_id"), rs.getString("event_status"),
                     rs.getLong("session_id"), rs.getString("session_status"),
                     rs.getTimestamp("sales_start_at").toInstant(),

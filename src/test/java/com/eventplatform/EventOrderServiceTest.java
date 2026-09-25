@@ -65,7 +65,7 @@ class EventOrderServiceTest {
             """);
         catalog = new EventCatalogService(db);
         orders = new EventOrderService(db, new DataSourceTransactionManager(source),
-                new EventNotificationOutbox(db, new ObjectMapper()), 900, 30);
+                new EventNotificationOutbox(db, new ObjectMapper()), 900, 30, 48);
     }
 
     @Test
@@ -78,6 +78,8 @@ class EventOrderServiceTest {
         assertThat(order.totalAmount()).isEqualTo(4750);
         assertThat(order.currency()).isEqualTo("CNY");
         assertThat(order.status()).isEqualTo("PENDING_PAYMENT");
+        assertThat(order.createdAt()).isEqualTo(db.queryForObject(
+                "SELECT created_at FROM et_order WHERE id=?", java.sql.Timestamp.class, order.id()).toInstant());
         assertThat(orders.create(7, "order-key-0000001", fixture.firstTierId(), 1).id())
                 .isEqualTo(order.id());
         assertThat(orders.order(order.id(), 7).id()).isEqualTo(order.id());

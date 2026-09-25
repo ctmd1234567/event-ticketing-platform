@@ -1,111 +1,71 @@
 <div align="center">
 
-# Event Trading Platform
+# Event Ticketing Platform
 
-### 面向活动交易的 Java 后端：订单、库存、支付与故障恢复
+面向活动票务交易场景的 Java 后端系统，重点解决库存一致性、支付不确定性、补偿退款和可靠异步通知。
 
-**同步下单 · 库存守恒 · 幂等重试 · 支付 UNKNOWN 恢复 · 关单竞争 · 晚到支付补偿**
+[![Java 21](https://img.shields.io/badge/Java-21-E76F00)](https://openjdk.org/projects/jdk/21/) [![Spring Boot](https://img.shields.io/badge/Spring_Boot-3.5.16-6DB33F)](https://spring.io/projects/spring-boot) [![MySQL](https://img.shields.io/badge/MySQL-8.4-4479A1)](https://www.mysql.com/) ![Redis](https://img.shields.io/badge/Redis-7.4-DC382D) ![RabbitMQ](https://img.shields.io/badge/RabbitMQ-4.1-FF6600) [![CI](https://github.com/ctmd1234567/event-trading-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/ctmd1234567/event-trading-platform/actions/workflows/ci.yml)
 
-[![Java 21](https://img.shields.io/badge/Java-21-E76F00?logo=openjdk&logoColor=white)](https://openjdk.org/projects/jdk/21/)
-[![Spring Boot 3.5](https://img.shields.io/badge/Spring%20Boot-3.5.16-6DB33F?logo=springboot&logoColor=white)](https://spring.io/projects/spring-boot)
-[![MySQL 8.4](https://img.shields.io/badge/MySQL-8.4-4479A1?logo=mysql&logoColor=white)](https://www.mysql.com/)
-[![Tests](https://img.shields.io/badge/verification-123%20tests%20passed-2EA44F)](#验证证据)
-[![CI](https://github.com/ctmd1234567/event-trading-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/ctmd1234567/event-trading-platform/actions/workflows/ci.yml)
-
-[English](README.en.md) · [领域模型](docs/architecture/DOMAIN-MODEL.md) · [状态机](docs/architecture/STATE-MACHINES.md) · [API 合同](docs/architecture/API-CONTRACT.md) · [V1 验收记录](docs/verification/V1-VERIFICATION.md)
+[English](README.en.md)
 
 </div>
 
----
+## 项目简介
 
-## 项目重点
+活动、场次和票档组成可售目录；用户下单预占库存，随后支付、取消或超时关单。支付成功后可申请单次全额退款，状态变化可生成站内通知。系统是模块化单体：MySQL 是订单、库存、支付和退款的事实源；Redis 用于认证会话及辅助限流；RabbitMQ 只传递通知等非核心异步效果。**创建订单在本地 MySQL 事务中同步完成，不依赖消息队列。**
 
-项目围绕 Event 交易的事务边界与故障恢复实现，关键行为均有对应测试和验收记录：
+`Event → Session → TicketTier → Inventory → Order → Payment → Refund → Notification`
 
-- **库存是事务事实，不是缓存猜测**：下单在一个 MySQL 本地事务中创建订单、预占明细并更新 `available / reserved / allocated`，始终满足库存守恒。
-- **网络超时不等于支付失败**：请求超时进入 `UNKNOWN / PROCESSING`，复用同一业务号通过回调、主动查询与重启恢复收敛，避免重复扣款。
-- **竞争结果由提交顺序决定**：支付先赢则完成分配；关单先赢则释放库存，之后确认的扣款生成唯一全额补偿退款，订单不会被错误“复活”。
-- **测试主动制造坏路径**：真实 MySQL 行锁、并发屏障、响应丢失注入、重复回调与重启恢复用于证明边界，而不是用 `sleep` 猜竞态。
+## 核心能力
 
-## 一眼看懂架构
+- 管理员创建、发布与停售活动、场次、票档；按销售窗口和服务端价格下单。
+- 同步创建单票订单并预占库存；用户取消和持久化过期扫描释放预占，重启后可补扫。
+- 模拟网关支付、可信回调、查询和持久化恢复；用户单次全额退款及晚到扣款补偿。
+- 通知 Outbox、RabbitMQ 发布与消费、站内通知查询、失败隔离和管理员审计重驱。
+- 管理员针对性对账，仅在严格前置条件下安全修复晚到支付的退款意图。
+
+## 架构
 
 ```mermaid
 flowchart LR
-    Client[Client / Postman] --> Security[Identity & Security]
-    Security --> Catalog[Event Catalog]
-    Security --> Order[Order & Inventory]
-    Order -->|one local transaction| MySQL[(MySQL 8.4)]
-    Catalog --> MySQL
-    Order --> Payment[Payment Orchestration]
-    Payment --> Gateway[Simulated Gateway Boundary]
-    Payment --> Compensation[Compensation Refund]
-    Payment --> MySQL
-    Compensation --> Gateway
-    Compensation --> MySQL
-    MySQL --> Recovery[Expiry & Payment Recovery]
-    Security <--> Redis[(Redis 7.4)]
+    C[Client] --> S[Security]
+    S --> E[Event catalog]
+    S --> O[Order and inventory]
+    O -->|local transaction| D[(MySQL)]
+    E --> D
+    S <--> R[(Redis sessions)]
+    O --> P[Payment and refund]
+    P --> G[Simulated gateway boundary]
+    P --> D
+    D -->|committed Outbox intent| X[Outbox publisher]
+    X --> M[(RabbitMQ)]
+    M --> N[Notification consumer]
+    N --> D
 ```
 
-默认产品的交易核心仍为同步 MySQL 事务。支付成功和订单关闭在同一事务写入站内通知 Outbox；RabbitMQ 只承载通知副作用，不创建核心订单。第 9 项补齐停机恢复、有限消费重试、DLQ 与管理员审计重驱；旧 Voucher 消息实验已按第 12 项归档，正式应用不再提供该链路。
+## 核心工程设计
 
-## 核心业务闭环
+### 库存与幂等
 
-```text
-DRAFT Event
-   └─ publish ─> ON SALE
-                    └─ create order ─> PENDING_PAYMENT + RESERVED
-                                           ├─ payment wins ─> PAID + CONFIRMED + allocated
-                                           └─ cancel/expire ─> CLOSED + RELEASED + available
-                                                                    └─ late charge
-                                                                        └─ one compensation refund
-```
+每个票档始终满足 `available + reserved + allocated = capacity`，三个计数非负。下单事务创建订单与预占，并将 `available → reserved`；关单事务关闭订单、释放预占，将 `reserved → available`；正常支付确认事务保存结果，将 `reserved → allocated`。同一用户、同一幂等键、同一请求返回原订单；同键不同参数冲突。数据库唯一约束和条件更新是最终正确性保障。超载时下单入口受控返回 429；成功响应只在 MySQL 事务提交后返回。成交后全额退款默认不回售。
 
-固定的 V1 规则：一单一票、CNY 整数分、同用户同票档限购一单、同幂等键同载荷返回原结果、成交后退款不回售。
+### 支付不确定性与关单竞争
 
-## 已实现能力
+网络超时不等于支付失败。`UNKNOWN / PROCESSING` 记录复用同一业务号，通过回调、网关查询和恢复扫描收敛。支付先提交，订单从 `PENDING_PAYMENT → PAID`，预占转分配；关单先提交，订单从 `PENDING_PAYMENT → CLOSED`，预占释放。若关单后才确认扣款，订单保持关闭并创建唯一全额补偿退款，不重新占库存。
 
-### Event 与同步交易
+### 可靠消息与退款对账
 
-- 活动、场次、票档创建、发布、停售与公开查询
-- 服务端价格快照、销售窗口校验和用户所有权隔离
-- 同步订单创建、独立库存预占记录、幂等键与购买限制
-- 1000 个并发请求竞争 100 张票：100 成功、900 明确业务冲突、0 技术失败
+业务变化与通知 Outbox 意图在同一 MySQL 事务提交。发布端用租约、有限重试、Publisher Confirm 和 mandatory Return；消费端在提交站内通知后 ACK，按 `event_id` 去重。重复发布允许，语义为至少一次投递。毒消息隔离到 DLQ，可由管理员带原因审计重驱；Confirm 不证明最终通知效果，DLQ 也不是零丢失保证。退款使用单订单、单支付、单次全额退款约束；不确定结果同号恢复。针对性对账只自动修复有明确前置条件的晚到扣款退款缺口，其余交人工核对。
 
-### 生命周期与恢复
+## 工程验证
 
-- 用户取消与超时关单共享同一事务边界
-- 固定锁顺序：`order → reservation → ticket tier`
-- 持久化过期扫描、失败退避与应用重启补扫
-- 取消/过期、下单/释放并发下仍保持库存守恒
+[本地 Maven 报告](docs/engineering/results/local-maven-reports-20260925.txt)记录 65 个默认测试和 82 个 Testcontainers 集成测试，共 **147 个，0 失败、0 错误、0 跳过**。覆盖真实 MySQL 与 RabbitMQ、确定性并发和支付/关单竞态、Broker 停机、Redis 故障及进程恢复。本地执行 `mvn test` 与 `mvn -Pinfrastructure verify` 均退出码 0；[报告摘要](docs/engineering/results/local-maven-reports-20260925.txt)保留套件明细。[测试范围与限制](docs/engineering/TESTING.md)。
 
-### 支付与补偿
+本地同步下单压测使用独立票档和用户、固定到达率、每轮 5 秒：单热点票档 150/s 的复测为 750/750 成功、0 受控拒绝和技术失败，P95 15.15 ms；同一票档 250/s 为 898 次成功写入、353 次受控 429、0 技术失败，P95 370.50 ms；三票档 500/s 为 2501/2501 成功，P95 21.39 ms。所有成功写入均与 MySQL 订单、预占和库存守恒核对。短时本机结果不代表长期容量或生产 SLA；冷启动差异、P50/P99、丢弃数和逐轮结果见[性能报告](docs/engineering/PERFORMANCE.md)。
 
-- 模拟网关使用独立提交边界，不与本地订单事务混在一起
-- 支付创建、查询、刷新、签名回调和持久化恢复
-- `UNKNOWN / PROCESSING / MANUAL_REQUIRED` 可查询，不把不确定状态伪装成成功或失败
-- 关单后晚到支付创建唯一全额补偿退款；补偿不二次修改库存
-- ADMIN 人工接管使用同业务号、幂等键、原因和审计记录
+## 快速启动
 
-## 验证证据
-
-2026-09-19 使用 Microsoft OpenJDK 21.0.7 和 Maven 3.9.16 验证当前 V1 候选：
-
-- **65 个默认测试**：身份、安全、Event、库存事务、支付服务、控制器和模拟网关
-- **58 个 infrastructure profile 集成测试**：其中 57 个覆盖 Event V1，另 1 个隔离验证历史 RabbitMQ 实验
-- **合计 123 个测试**：0 失败、0 错误、0 忽略；`mvn -Pinfrastructure verify` 同时执行默认套件与 Testcontainers 集成套件
-- **Event 下单基线**：200 次认证 `POST /api/v1/orders`，100 成功、100 明确业务冲突、0 技术失败、0 丢弃；P50/P95/P99 为 0.012996/0.040840/0.048521 秒，库存与关联审计全部通过
-
-完整命令、Demo、版本、数据库审计与限制见 [V1 验收记录](docs/verification/V1-VERIFICATION.md) 和 [Event 下单基线结果](docs/verification/results/event-order-creation-baseline-20260919.md)。Flyway 11.7.2 对 MySQL 8.4 仍有版本认证提示；迁移与断言实际通过，这不是生产兼容性认证。
-
-## 运行
-
-### 环境
-
-- Java 21
-- Maven 3.9+
-- Docker Desktop / Docker Engine
-
-在项目根目录创建未跟踪的 `.env`：
+需要 Java 21、Maven 3.9+ 和 Docker。创建本地未跟踪的 `.env`，例如：
 
 ```properties
 MYSQL_URL=jdbc:mysql://127.0.0.1:3307/event_trading?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
@@ -117,93 +77,30 @@ ADMIN_USER_IDS=1
 RABBITMQ_USER=event_app
 RABBITMQ_PASSWORD=replace-with-a-local-password
 RABBITMQ_PORT=5673
-EVENT_NOTIFICATIONS_ENABLED=true
 ```
-
-### 启动与验证
 
 ```bash
 docker compose up -d
-docker compose ps
 mvn test
 mvn -Dspring-boot.run.profiles=local spring-boot:run
-```
-
-默认 Compose 启动 MySQL、Redis 与持久化单节点 RabbitMQ；若暂不运行通知，可设 `EVENT_NOTIFICATIONS_ENABLED=false`，交易仍写入待发 Outbox。应用地址为 `http://127.0.0.1:8081`，管理端点仅监听 `127.0.0.1:8082`。`local` profile 会返回本地验证码，禁止暴露到公网。
-
-真实依赖集成测试使用隔离 Testcontainers，不写个人开发库：
-
-```bash
 mvn -Pinfrastructure verify
 ```
 
-### V1 Demo
+应用监听 `127.0.0.1:8081`，管理端点监听 `127.0.0.1:8082`。`local` profile 会返回本地验证码，只适合本机演示。集成测试使用隔离的 Testcontainers 数据库与 Broker。
 
-以 `local` profile 启动应用，且让 `ADMIN_USER_IDS` 包含演示 ADMIN 身份；也可传入已登录且已加入 allowlist 的 `DEMO_ADMIN_TOKEN`。脚本动态创建 Event、Session 和三个独立 TicketTier，不依赖历史业务 ID。演示超时关单时，以 30 秒支付窗口启动应用：
+## 本地演示
+
+让 `ADMIN_USER_IDS` 包含演示管理员，或设置已登录且在允许列表中的 `DEMO_ADMIN_TOKEN`。脚本动态创建活动、场次和三个票档，演示支付、取消、超时关单、越权拒绝与库存审计：
 
 ```bash
 EVENT_ORDER_PAYMENT_WINDOW_SECONDS=30 mvn -Dspring-boot.run.profiles=local spring-boot:run
 bash scripts/demo-v1.sh
 ```
 
-Demo 覆盖登录、动态建档与发布、公开查询、幂等下单与支付、越权读取拒绝、用户取消、超时关单，以及最终订单、支付和三档库存守恒。已有 Event 请求集合仍位于 [`postman/collections/Event-V1.postman_collection.json`](postman/collections/Event-V1.postman_collection.json)。
+[Postman 请求集合](postman/collections/Event-V1.postman_collection.json)提供请求示例。
 
-Event 下单基线使用隔离 Event/TicketTier 和 Redis 会话，由独立认证用户并发调用 `POST /api/v1/orders`，记录成功、业务冲突、技术失败及 P50/P95/P99，并在结束时审计库存守恒和异常重复订单/预留：
+## 项目结构与文档
 
-```bash
-RESULT_FILE=docs/verification/results/event-order-creation-baseline.md \
-  bash loadtest/event-trading-baseline.sh
-```
+`src/` 为应用、迁移和测试；`docs/` 为架构与工程证据；`loadtest/` 为隔离负载入口和 SQL 审计；`postman/` 为请求示例；`scripts/` 为演示及报告门禁。
 
-## API 导航
-
-- 公开目录：`GET /api/v1/events`、`GET /api/v1/events/{id}`
-- ADMIN 建档：`POST /api/v1/admin/events`、场次、票档、发布与停售命令
-- 用户订单：`POST /api/v1/orders`、查询、列表、取消
-- 支付与退款：创建/查询/刷新支付，用户申请全额退款，查询/刷新退款
-- 可信回调：`POST /api/v1/payment-callbacks/simulated`
-- ADMIN 接管：查询恢复工作、同号重试支付/退款、针对性对账与安全修复
-
-请求和状态语义以 [API 合同](docs/architecture/API-CONTRACT.md) 为准。
-
-## 项目结构
-
-```text
-src/main/java/com/eventplatform/
-├── catalog/       Event、Session、TicketTier
-├── controller/    Event、Order、Payment、Identity、Notification API
-├── notification/  Event Outbox、RabbitMQ 发布消费、站内通知查询
-├── order/         同步订单、库存、关单；隔离的历史工程实验
-├── payment/       网关边界、回调、UNKNOWN 恢复、全额退款与针对性对账
-├── security/      Token、验证码、权限与限流
-├── service/       最小身份服务
-└── config/        Security、MyBatis、实验 Rabbit 配置
-
-src/main/resources/db/migration/   Flyway V1～V6 不可回写；V7～V9 为前向迁移
-src/test/                         单元、并发与 Testcontainers 验收
-docs/                             架构、状态机、API 与验证证据
-postman/                          Event V1 请求集合与本地环境
-scripts/                          V1 联合 Demo
-loadtest/                         Event 基线与隔离的历史工程实验
-```
-
-## 当前边界与路线图
-
-- 当前完成：V1 Core Trading 与 V2 第 8～12 项本地验收；候选未推送，远程 CI 尚未触发。V1 证据见 [V1 验收记录](docs/verification/V1-VERIFICATION.md)
-- V2 第 8 项：Event Notification Outbox/MQ 与站内通知；实现与验收见 [第 8 项记录](docs/verification/CHECKLIST-8-EVENT-NOTIFICATIONS.md)
-- V2 第 9 项：Broker 停机恢复、通知 DLQ 与管理员重驱；测试条件、迁移和限制见 [第 9 项记录](docs/verification/CHECKLIST-9-MQ-RECOVERY.md)
-- V2 第 10 项：用户全额退款与针对性对账；实现、验证和限制见 [第 10 项记录](docs/verification/CHECKLIST-10-REFUND-RECONCILIATION.md)
-- V2 第 11 项：[Event SQL、负载、Redis 故障与进程恢复证据](docs/verification/CHECKLIST-11-EVENT-EVIDENCE.md)
-- V2 第 12 项：[工程收尾与验收记录](docs/verification/CHECKLIST-12-V2-ACCEPTANCE.md)；旧实验见[归档说明](docs/history/LEGACY-VOUCHER-ARCHIVE.md)
-- V3：按需要选择 Soak、告警、备份恢复等增强；不是项目完成门槛
-
-未实现：SSE 推送、通用对账框架和完整 OpenAPI。站内通知可由登录用户通过 `GET /api/v1/notifications` 查询最近 100 条；管理员可在确认原因后审计重驱。DLQ 和单节点持久化不构成零丢失保证。
-
-高并发工程实验（已归档的 Voucher/Outbox/RabbitMQ 写链路，包含失败冷启动轮次、限制和原始证据）：[1500 RPS 实验记录](docs/verification/CONCURRENCY-EXPERIMENT-1500-RPS-2026-09-18.md)。该实验不代表 Event 性能、生产 SLA 或长期稳定性；复现方式见[归档说明](docs/history/LEGACY-VOUCHER-ARCHIVE.md)。
-
-## 设计文档
-
-- [领域模型与事务边界](docs/architecture/DOMAIN-MODEL.md)
-- [订单、支付与退款状态机](docs/architecture/STATE-MACHINES.md)
-- [API 合同](docs/architecture/API-CONTRACT.md)
-- [支付边界设计](docs/architecture/PAYMENT-BOUNDARY-DESIGN.md)
+[领域模型](docs/architecture/DOMAIN-MODEL.md) · [状态机](docs/architecture/STATE-MACHINES.md) · [支付边界](docs/architecture/PAYMENT-BOUNDARY-DESIGN.md) · [API 合同](docs/architecture/API-CONTRACT.md) · [可靠性](docs/engineering/RELIABILITY.md) · [性能](docs/engineering/PERFORMANCE.md) · [测试](docs/engineering/TESTING.md)

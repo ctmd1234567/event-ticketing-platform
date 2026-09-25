@@ -1,6 +1,6 @@
 local count=tonumber(ARGV[1])
-if not count or count < 1 or count > 1000 then
-  return redis.error_reply('count must be between 1 and 1000')
+if not count or count < 1 or count > 5000 then
+  return redis.error_reply('count must be between 1 and 5000')
 end
 
 for index=1,count do
