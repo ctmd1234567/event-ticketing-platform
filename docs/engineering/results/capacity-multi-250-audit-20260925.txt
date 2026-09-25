@@ -1,0 +1,10 @@
+tier_id	capacity	available	reserved	allocated	orders	pending_orders	reservations	reserved_reservations	conserved	nonnegative	order_reservation_match	unique_buyers
+9900251403	5000	4592	408	0	408	408	408	408	1	1	1	1
+9900251404	5000	4587	413	0	413	413	413	413	1	1	1	1
+9900251405	5000	4588	412	0	412	412	412	412	1	1	1	1
+legacy_requests
+34092
+legacy_orders
+34092
+legacy_outbox
+34092

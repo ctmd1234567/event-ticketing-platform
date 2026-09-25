@@ -36,6 +36,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @ActiveProfiles("local")
 @SpringBootTest(properties = {
         "app.event-orders.expiry-scan-enabled=false",
+        "app.event-orders.max-in-flight=64",
         "app.payment-recovery.enabled=false",
         "app.event-notifications.enabled=false",
         "spring.rabbitmq.port=1"
@@ -92,6 +93,9 @@ class EventInfrastructureIT {
 
         assertThat(eventOrder.unitPrice()).isEqualTo(4750);
         assertThat(eventOrder.currency()).isEqualTo("CNY");
+        assertThat(eventOrder.createdAt()).isEqualTo(db.queryForObject(
+                "SELECT created_at FROM et_order WHERE id=?", java.sql.Timestamp.class,
+                eventOrder.id()).toInstant());
         assertThat(db.queryForMap(
                 "SELECT available,reserved,allocated FROM et_ticket_tier WHERE id=910001"))
                 .containsEntry("available", 1)

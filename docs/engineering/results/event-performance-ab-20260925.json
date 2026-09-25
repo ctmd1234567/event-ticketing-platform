@@ -1,0 +1,2056 @@
+{
+  "context": {
+    "date": "2026-09-25",
+    "environment": "Windows k6 2.2.0 -> IDEA Java 21 single instance -> Docker MySQL 8.4 / Redis 7.4 / RabbitMQ 4.1",
+    "load": "constant arrival rate, 5 seconds, 512 preallocated VUs, 5000 capacity per tier, unique authenticated users and idempotency keys, fresh event/session/tier per run, no payment",
+    "settings": "expiry, payment recovery, notification publisher disabled equally in all stages; Hikari max 32; before Tomcat 300 and no admission; scoped Tomcat 300 and no admission; final Tomcat 128/admission 48; tuned same build with admission 96; stable same final 48 after warmup",
+    "limitations": "short local measurements with host variability; CPU sampled by Docker stats only in stable runs; transaction/lock counters are instance-wide deltas, not per-request traces; invalid expired-token runs are excluded"
+  },
+  "runs": [
+    {
+      "run": "before-hot200",
+      "k6": {
+        "http": 1001,
+        "successfulBusinessWrites": 993,
+        "controlledRejections": 0,
+        "businessRejections": 0,
+        "technicalFailures": 8,
+        "droppedIterations": 0,
+        "p50Ms": 876.9109,
+        "p95Ms": 2578.0484,
+        "p99Ms": 3430.367
+      },
+      "hikariSampleMax": {
+        "active": 32.0,
+        "idle": 32.0,
+        "pending": 235.0
+      },
+      "hikariTimeoutDelta": 8.0,
+      "mysql": {
+        "rowLockWaitsDelta": 992,
+        "rowLockTimeMsDelta": 186024,
+        "transactionCountDelta": 1992,
+        "transactionMeanMs": 96.59,
+        "connectionsDelta": 19,
+        "cpuPercentSamples": []
+      },
+      "inventoryAudit": [
+        {
+          "tier": 9900260003,
+          "capacity": 5000,
+          "available": 4007,
+          "reserved": 993,
+          "allocated": 0,
+          "orders": 993,
+          "pendingOrders": 993,
+          "reservations": 993,
+          "reservedReservations": 993,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        },
+        {
+          "tier": 9900260004,
+          "capacity": 5000,
+          "available": 5000,
+          "reserved": 0,
+          "allocated": 0,
+          "orders": 0,
+          "pendingOrders": 0,
+          "reservations": 0,
+          "reservedReservations": 0,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        },
+        {
+          "tier": 9900260005,
+          "capacity": 5000,
+          "available": 5000,
+          "reserved": 0,
+          "allocated": 0,
+          "orders": 0,
+          "pendingOrders": 0,
+          "reservations": 0,
+          "reservedReservations": 0,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        }
+      ]
+    },
+    {
+      "run": "before-hot200repeat",
+      "k6": {
+        "http": 1000,
+        "successfulBusinessWrites": 1000,
+        "controlledRejections": 0,
+        "businessRejections": 0,
+        "technicalFailures": 0,
+        "droppedIterations": 0,
+        "p50Ms": 475.40815,
+        "p95Ms": 1271.295025,
+        "p99Ms": 1782.8738869999997
+      },
+      "hikariSampleMax": {
+        "active": 32.0,
+        "idle": 32.0,
+        "pending": 121.0
+      },
+      "hikariTimeoutDelta": 0.0,
+      "mysql": {
+        "rowLockWaitsDelta": 999,
+        "rowLockTimeMsDelta": 169133,
+        "transactionCountDelta": 2002,
+        "transactionMeanMs": 87.461,
+        "connectionsDelta": 3,
+        "cpuPercentSamples": []
+      },
+      "inventoryAudit": [
+        {
+          "tier": 9900260103,
+          "capacity": 5000,
+          "available": 4000,
+          "reserved": 1000,
+          "allocated": 0,
+          "orders": 1000,
+          "pendingOrders": 1000,
+          "reservations": 1000,
+          "reservedReservations": 1000,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        },
+        {
+          "tier": 9900260104,
+          "capacity": 5000,
+          "available": 5000,
+          "reserved": 0,
+          "allocated": 0,
+          "orders": 0,
+          "pendingOrders": 0,
+          "reservations": 0,
+          "reservedReservations": 0,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        },
+        {
+          "tier": 9900260105,
+          "capacity": 5000,
+          "available": 5000,
+          "reserved": 0,
+          "allocated": 0,
+          "orders": 0,
+          "pendingOrders": 0,
+          "reservations": 0,
+          "reservedReservations": 0,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        }
+      ]
+    },
+    {
+      "run": "before-hot250",
+      "k6": {
+        "http": 1251,
+        "successfulBusinessWrites": 1209,
+        "controlledRejections": 0,
+        "businessRejections": 0,
+        "technicalFailures": 42,
+        "droppedIterations": 0,
+        "p50Ms": 1118.9077,
+        "p95Ms": 3008.7853,
+        "p99Ms": 3216.3588
+      },
+      "hikariSampleMax": {
+        "active": 32.0,
+        "idle": 32.0,
+        "pending": 268.0
+      },
+      "hikariTimeoutDelta": 42.0,
+      "mysql": {
+        "rowLockWaitsDelta": 1208,
+        "rowLockTimeMsDelta": 215327,
+        "transactionCountDelta": 2418,
+        "transactionMeanMs": 92.041,
+        "connectionsDelta": 4,
+        "cpuPercentSamples": []
+      },
+      "inventoryAudit": [
+        {
+          "tier": 9900260203,
+          "capacity": 5000,
+          "available": 3791,
+          "reserved": 1209,
+          "allocated": 0,
+          "orders": 1209,
+          "pendingOrders": 1209,
+          "reservations": 1209,
+          "reservedReservations": 1209,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        },
+        {
+          "tier": 9900260204,
+          "capacity": 5000,
+          "available": 5000,
+          "reserved": 0,
+          "allocated": 0,
+          "orders": 0,
+          "pendingOrders": 0,
+          "reservations": 0,
+          "reservedReservations": 0,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        },
+        {
+          "tier": 9900260205,
+          "capacity": 5000,
+          "available": 5000,
+          "reserved": 0,
+          "allocated": 0,
+          "orders": 0,
+          "pendingOrders": 0,
+          "reservations": 0,
+          "reservedReservations": 0,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        }
+      ]
+    },
+    {
+      "run": "before-hot300",
+      "k6": {
+        "http": 1334,
+        "successfulBusinessWrites": 1276,
+        "controlledRejections": 0,
+        "businessRejections": 0,
+        "technicalFailures": 58,
+        "droppedIterations": 167,
+        "p50Ms": 1840.6078,
+        "p95Ms": 3537.5318899999997,
+        "p99Ms": 4086.5570060000073
+      },
+      "hikariSampleMax": {
+        "active": 32.0,
+        "idle": 32.0,
+        "pending": 268.0
+      },
+      "hikariTimeoutDelta": 58.0,
+      "mysql": {
+        "rowLockWaitsDelta": 1275,
+        "rowLockTimeMsDelta": 231035,
+        "transactionCountDelta": 2555,
+        "transactionMeanMs": 93.477,
+        "connectionsDelta": 4,
+        "cpuPercentSamples": []
+      },
+      "inventoryAudit": [
+        {
+          "tier": 9900260303,
+          "capacity": 5000,
+          "available": 3724,
+          "reserved": 1276,
+          "allocated": 0,
+          "orders": 1276,
+          "pendingOrders": 1276,
+          "reservations": 1276,
+          "reservedReservations": 1276,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        },
+        {
+          "tier": 9900260304,
+          "capacity": 5000,
+          "available": 5000,
+          "reserved": 0,
+          "allocated": 0,
+          "orders": 0,
+          "pendingOrders": 0,
+          "reservations": 0,
+          "reservedReservations": 0,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        },
+        {
+          "tier": 9900260305,
+          "capacity": 5000,
+          "available": 5000,
+          "reserved": 0,
+          "allocated": 0,
+          "orders": 0,
+          "pendingOrders": 0,
+          "reservations": 0,
+          "reservedReservations": 0,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        }
+      ]
+    },
+    {
+      "run": "before-multi250",
+      "k6": {
+        "http": 1250,
+        "successfulBusinessWrites": 1208,
+        "controlledRejections": 0,
+        "businessRejections": 0,
+        "technicalFailures": 42,
+        "droppedIterations": 0,
+        "p50Ms": 1353.55085,
+        "p95Ms": 3128.02336,
+        "p99Ms": 3431.128001
+      },
+      "hikariSampleMax": {
+        "active": 32.0,
+        "idle": 32.0,
+        "pending": 268.0
+      },
+      "hikariTimeoutDelta": 42.0,
+      "mysql": {
+        "rowLockWaitsDelta": 2412,
+        "rowLockTimeMsDelta": 219950,
+        "transactionCountDelta": 2419,
+        "transactionMeanMs": 94.018,
+        "connectionsDelta": 4,
+        "cpuPercentSamples": []
+      },
+      "inventoryAudit": [
+        {
+          "tier": 9900260403,
+          "capacity": 5000,
+          "available": 4599,
+          "reserved": 401,
+          "allocated": 0,
+          "orders": 401,
+          "pendingOrders": 401,
+          "reservations": 401,
+          "reservedReservations": 401,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        },
+        {
+          "tier": 9900260404,
+          "capacity": 5000,
+          "available": 4595,
+          "reserved": 405,
+          "allocated": 0,
+          "orders": 405,
+          "pendingOrders": 405,
+          "reservations": 405,
+          "reservedReservations": 405,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        },
+        {
+          "tier": 9900260405,
+          "capacity": 5000,
+          "available": 4598,
+          "reserved": 402,
+          "allocated": 0,
+          "orders": 402,
+          "pendingOrders": 402,
+          "reservations": 402,
+          "reservedReservations": 402,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        }
+      ]
+    },
+    {
+      "run": "scoped-hot200",
+      "k6": {
+        "http": 1001,
+        "successfulBusinessWrites": 1001,
+        "controlledRejections": 0,
+        "businessRejections": 0,
+        "technicalFailures": 0,
+        "droppedIterations": 0,
+        "p50Ms": 207.3087,
+        "p95Ms": 595.8462,
+        "p99Ms": 873.4293
+      },
+      "hikariSampleMax": {
+        "active": 32.0,
+        "idle": 32.0,
+        "pending": 57.0
+      },
+      "hikariTimeoutDelta": 0.0,
+      "mysql": {
+        "rowLockWaitsDelta": 1000,
+        "rowLockTimeMsDelta": 143902,
+        "transactionCountDelta": 2002,
+        "transactionMeanMs": 74.64,
+        "connectionsDelta": 8,
+        "cpuPercentSamples": []
+      },
+      "inventoryAudit": [
+        {
+          "tier": 9900261003,
+          "capacity": 5000,
+          "available": 3999,
+          "reserved": 1001,
+          "allocated": 0,
+          "orders": 1001,
+          "pendingOrders": 1001,
+          "reservations": 1001,
+          "reservedReservations": 1001,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        },
+        {
+          "tier": 9900261004,
+          "capacity": 5000,
+          "available": 5000,
+          "reserved": 0,
+          "allocated": 0,
+          "orders": 0,
+          "pendingOrders": 0,
+          "reservations": 0,
+          "reservedReservations": 0,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        },
+        {
+          "tier": 9900261005,
+          "capacity": 5000,
+          "available": 5000,
+          "reserved": 0,
+          "allocated": 0,
+          "orders": 0,
+          "pendingOrders": 0,
+          "reservations": 0,
+          "reservedReservations": 0,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        }
+      ]
+    },
+    {
+      "run": "scoped-hot250",
+      "k6": {
+        "http": 1250,
+        "successfulBusinessWrites": 1205,
+        "controlledRejections": 0,
+        "businessRejections": 0,
+        "technicalFailures": 45,
+        "droppedIterations": 0,
+        "p50Ms": 1058.72945,
+        "p95Ms": 3010.689705,
+        "p99Ms": 3324.071861
+      },
+      "hikariSampleMax": {
+        "active": 32.0,
+        "idle": 32.0,
+        "pending": 268.0
+      },
+      "hikariTimeoutDelta": 45.0,
+      "mysql": {
+        "rowLockWaitsDelta": 1204,
+        "rowLockTimeMsDelta": 218741,
+        "transactionCountDelta": 2410,
+        "transactionMeanMs": 93.859,
+        "connectionsDelta": 3,
+        "cpuPercentSamples": []
+      },
+      "inventoryAudit": [
+        {
+          "tier": 9900261103,
+          "capacity": 5000,
+          "available": 3795,
+          "reserved": 1205,
+          "allocated": 0,
+          "orders": 1205,
+          "pendingOrders": 1205,
+          "reservations": 1205,
+          "reservedReservations": 1205,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        },
+        {
+          "tier": 9900261104,
+          "capacity": 5000,
+          "available": 5000,
+          "reserved": 0,
+          "allocated": 0,
+          "orders": 0,
+          "pendingOrders": 0,
+          "reservations": 0,
+          "reservedReservations": 0,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        },
+        {
+          "tier": 9900261105,
+          "capacity": 5000,
+          "available": 5000,
+          "reserved": 0,
+          "allocated": 0,
+          "orders": 0,
+          "pendingOrders": 0,
+          "reservations": 0,
+          "reservedReservations": 0,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        }
+      ]
+    },
+    {
+      "run": "scoped-hot300",
+      "k6": {
+        "http": 1386,
+        "successfulBusinessWrites": 1355,
+        "controlledRejections": 0,
+        "businessRejections": 0,
+        "technicalFailures": 31,
+        "droppedIterations": 114,
+        "p50Ms": 1592.30535,
+        "p95Ms": 3294.279,
+        "p99Ms": 3822.928280000002
+      },
+      "hikariSampleMax": {
+        "active": 32.0,
+        "idle": 32.0,
+        "pending": 268.0
+      },
+      "hikariTimeoutDelta": 31.0,
+      "mysql": {
+        "rowLockWaitsDelta": 1354,
+        "rowLockTimeMsDelta": 231304,
+        "transactionCountDelta": 2713,
+        "transactionMeanMs": 88.132,
+        "connectionsDelta": 3,
+        "cpuPercentSamples": []
+      },
+      "inventoryAudit": [
+        {
+          "tier": 9900261203,
+          "capacity": 5000,
+          "available": 3645,
+          "reserved": 1355,
+          "allocated": 0,
+          "orders": 1355,
+          "pendingOrders": 1355,
+          "reservations": 1355,
+          "reservedReservations": 1355,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        },
+        {
+          "tier": 9900261204,
+          "capacity": 5000,
+          "available": 5000,
+          "reserved": 0,
+          "allocated": 0,
+          "orders": 0,
+          "pendingOrders": 0,
+          "reservations": 0,
+          "reservedReservations": 0,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        },
+        {
+          "tier": 9900261205,
+          "capacity": 5000,
+          "available": 5000,
+          "reserved": 0,
+          "allocated": 0,
+          "orders": 0,
+          "pendingOrders": 0,
+          "reservations": 0,
+          "reservedReservations": 0,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        }
+      ]
+    },
+    {
+      "run": "scoped-hot400",
+      "k6": {
+        "http": 1376,
+        "successfulBusinessWrites": 1352,
+        "controlledRejections": 0,
+        "businessRejections": 0,
+        "technicalFailures": 24,
+        "droppedIterations": 624,
+        "p50Ms": 1994.87475,
+        "p95Ms": 3594.92905,
+        "p99Ms": 4173.7865
+      },
+      "hikariSampleMax": {
+        "active": 32.0,
+        "idle": 32.0,
+        "pending": 268.0
+      },
+      "hikariTimeoutDelta": 24.0,
+      "mysql": {
+        "rowLockWaitsDelta": 1351,
+        "rowLockTimeMsDelta": 229286,
+        "transactionCountDelta": 2705,
+        "transactionMeanMs": 87.6,
+        "connectionsDelta": 3,
+        "cpuPercentSamples": []
+      },
+      "inventoryAudit": [
+        {
+          "tier": 9900261303,
+          "capacity": 5000,
+          "available": 3648,
+          "reserved": 1352,
+          "allocated": 0,
+          "orders": 1352,
+          "pendingOrders": 1352,
+          "reservations": 1352,
+          "reservedReservations": 1352,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        },
+        {
+          "tier": 9900261304,
+          "capacity": 5000,
+          "available": 5000,
+          "reserved": 0,
+          "allocated": 0,
+          "orders": 0,
+          "pendingOrders": 0,
+          "reservations": 0,
+          "reservedReservations": 0,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        },
+        {
+          "tier": 9900261305,
+          "capacity": 5000,
+          "available": 5000,
+          "reserved": 0,
+          "allocated": 0,
+          "orders": 0,
+          "pendingOrders": 0,
+          "reservations": 0,
+          "reservedReservations": 0,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        }
+      ]
+    },
+    {
+      "run": "scoped-multi250",
+      "k6": {
+        "http": 1251,
+        "successfulBusinessWrites": 1251,
+        "controlledRejections": 0,
+        "businessRejections": 0,
+        "technicalFailures": 0,
+        "droppedIterations": 0,
+        "p50Ms": 10.1228,
+        "p95Ms": 287.12604999999996,
+        "p99Ms": 472.58500000000004
+      },
+      "hikariSampleMax": {
+        "active": 2.0,
+        "idle": 27.0,
+        "pending": 0.0
+      },
+      "hikariTimeoutDelta": 0.0,
+      "mysql": {
+        "rowLockWaitsDelta": 273,
+        "rowLockTimeMsDelta": 8761,
+        "transactionCountDelta": 2504,
+        "transactionMeanMs": 6.596,
+        "connectionsDelta": 14,
+        "cpuPercentSamples": []
+      },
+      "inventoryAudit": [
+        {
+          "tier": 9900261403,
+          "capacity": 5000,
+          "available": 4583,
+          "reserved": 417,
+          "allocated": 0,
+          "orders": 417,
+          "pendingOrders": 417,
+          "reservations": 417,
+          "reservedReservations": 417,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        },
+        {
+          "tier": 9900261404,
+          "capacity": 5000,
+          "available": 4583,
+          "reserved": 417,
+          "allocated": 0,
+          "orders": 417,
+          "pendingOrders": 417,
+          "reservations": 417,
+          "reservedReservations": 417,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        },
+        {
+          "tier": 9900261405,
+          "capacity": 5000,
+          "available": 4583,
+          "reserved": 417,
+          "allocated": 0,
+          "orders": 417,
+          "pendingOrders": 417,
+          "reservations": 417,
+          "reservedReservations": 417,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        }
+      ]
+    },
+    {
+      "run": "final-hot200",
+      "k6": {
+        "http": 1000,
+        "successfulBusinessWrites": 945,
+        "controlledRejections": 55,
+        "businessRejections": 0,
+        "technicalFailures": 0,
+        "droppedIterations": 0,
+        "p50Ms": 144.74099999999999,
+        "p95Ms": 327.72646499999996,
+        "p99Ms": 459.22262399999994
+      },
+      "hikariSampleMax": {
+        "active": 32.0,
+        "idle": 32.0,
+        "pending": 16.0
+      },
+      "hikariTimeoutDelta": 0.0,
+      "mysql": {
+        "rowLockWaitsDelta": 839,
+        "rowLockTimeMsDelta": 94264,
+        "transactionCountDelta": 1892,
+        "transactionMeanMs": 52.225,
+        "connectionsDelta": 19,
+        "cpuPercentSamples": []
+      },
+      "inventoryAudit": [
+        {
+          "tier": 9900262003,
+          "capacity": 5000,
+          "available": 4055,
+          "reserved": 945,
+          "allocated": 0,
+          "orders": 945,
+          "pendingOrders": 945,
+          "reservations": 945,
+          "reservedReservations": 945,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        },
+        {
+          "tier": 9900262004,
+          "capacity": 5000,
+          "available": 5000,
+          "reserved": 0,
+          "allocated": 0,
+          "orders": 0,
+          "pendingOrders": 0,
+          "reservations": 0,
+          "reservedReservations": 0,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        },
+        {
+          "tier": 9900262005,
+          "capacity": 5000,
+          "available": 5000,
+          "reserved": 0,
+          "allocated": 0,
+          "orders": 0,
+          "pendingOrders": 0,
+          "reservations": 0,
+          "reservedReservations": 0,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        }
+      ]
+    },
+    {
+      "run": "final-hot250",
+      "k6": {
+        "http": 1251,
+        "successfulBusinessWrites": 898,
+        "controlledRejections": 353,
+        "businessRejections": 0,
+        "technicalFailures": 0,
+        "droppedIterations": 0,
+        "p50Ms": 228.0054,
+        "p95Ms": 370.5011,
+        "p99Ms": 443.1222
+      },
+      "hikariSampleMax": {
+        "active": 32.0,
+        "idle": 32.0,
+        "pending": 16.0
+      },
+      "hikariTimeoutDelta": 0.0,
+      "mysql": {
+        "rowLockWaitsDelta": 897,
+        "rowLockTimeMsDelta": 152725,
+        "transactionCountDelta": 1796,
+        "transactionMeanMs": 87.959,
+        "connectionsDelta": 3,
+        "cpuPercentSamples": []
+      },
+      "inventoryAudit": [
+        {
+          "tier": 9900262103,
+          "capacity": 5000,
+          "available": 4102,
+          "reserved": 898,
+          "allocated": 0,
+          "orders": 898,
+          "pendingOrders": 898,
+          "reservations": 898,
+          "reservedReservations": 898,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        },
+        {
+          "tier": 9900262104,
+          "capacity": 5000,
+          "available": 5000,
+          "reserved": 0,
+          "allocated": 0,
+          "orders": 0,
+          "pendingOrders": 0,
+          "reservations": 0,
+          "reservedReservations": 0,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        },
+        {
+          "tier": 9900262105,
+          "capacity": 5000,
+          "available": 5000,
+          "reserved": 0,
+          "allocated": 0,
+          "orders": 0,
+          "pendingOrders": 0,
+          "reservations": 0,
+          "reservedReservations": 0,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        }
+      ]
+    },
+    {
+      "run": "final-hot300",
+      "k6": {
+        "http": 1501,
+        "successfulBusinessWrites": 955,
+        "controlledRejections": 546,
+        "businessRejections": 0,
+        "technicalFailures": 0,
+        "droppedIterations": 0,
+        "p50Ms": 207.9133,
+        "p95Ms": 356.5474,
+        "p99Ms": 469.9061
+      },
+      "hikariSampleMax": {
+        "active": 32.0,
+        "idle": 32.0,
+        "pending": 16.0
+      },
+      "hikariTimeoutDelta": 0.0,
+      "mysql": {
+        "rowLockWaitsDelta": 954,
+        "rowLockTimeMsDelta": 153955,
+        "transactionCountDelta": 1910,
+        "transactionMeanMs": 83.359,
+        "connectionsDelta": 3,
+        "cpuPercentSamples": []
+      },
+      "inventoryAudit": [
+        {
+          "tier": 9900262203,
+          "capacity": 5000,
+          "available": 4045,
+          "reserved": 955,
+          "allocated": 0,
+          "orders": 955,
+          "pendingOrders": 955,
+          "reservations": 955,
+          "reservedReservations": 955,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        },
+        {
+          "tier": 9900262204,
+          "capacity": 5000,
+          "available": 5000,
+          "reserved": 0,
+          "allocated": 0,
+          "orders": 0,
+          "pendingOrders": 0,
+          "reservations": 0,
+          "reservedReservations": 0,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        },
+        {
+          "tier": 9900262205,
+          "capacity": 5000,
+          "available": 5000,
+          "reserved": 0,
+          "allocated": 0,
+          "orders": 0,
+          "pendingOrders": 0,
+          "reservations": 0,
+          "reservedReservations": 0,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        }
+      ]
+    },
+    {
+      "run": "final-hot400",
+      "k6": {
+        "http": 2001,
+        "successfulBusinessWrites": 999,
+        "controlledRejections": 1002,
+        "businessRejections": 0,
+        "technicalFailures": 0,
+        "droppedIterations": 0,
+        "p50Ms": 9.8011,
+        "p95Ms": 326.5691,
+        "p99Ms": 410.41
+      },
+      "hikariSampleMax": {
+        "active": 32.0,
+        "idle": 32.0,
+        "pending": 16.0
+      },
+      "hikariTimeoutDelta": 0.0,
+      "mysql": {
+        "rowLockWaitsDelta": 998,
+        "rowLockTimeMsDelta": 157281,
+        "transactionCountDelta": 2000,
+        "transactionMeanMs": 81.329,
+        "connectionsDelta": 3,
+        "cpuPercentSamples": []
+      },
+      "inventoryAudit": [
+        {
+          "tier": 9900262303,
+          "capacity": 5000,
+          "available": 4001,
+          "reserved": 999,
+          "allocated": 0,
+          "orders": 999,
+          "pendingOrders": 999,
+          "reservations": 999,
+          "reservedReservations": 999,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        },
+        {
+          "tier": 9900262304,
+          "capacity": 5000,
+          "available": 5000,
+          "reserved": 0,
+          "allocated": 0,
+          "orders": 0,
+          "pendingOrders": 0,
+          "reservations": 0,
+          "reservedReservations": 0,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        },
+        {
+          "tier": 9900262305,
+          "capacity": 5000,
+          "available": 5000,
+          "reserved": 0,
+          "allocated": 0,
+          "orders": 0,
+          "pendingOrders": 0,
+          "reservations": 0,
+          "reservedReservations": 0,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        }
+      ]
+    },
+    {
+      "run": "final-multi250",
+      "k6": {
+        "http": 1251,
+        "successfulBusinessWrites": 1251,
+        "controlledRejections": 0,
+        "businessRejections": 0,
+        "technicalFailures": 0,
+        "droppedIterations": 0,
+        "p50Ms": 9.2659,
+        "p95Ms": 14.79335,
+        "p99Ms": 23.4288
+      },
+      "hikariSampleMax": {
+        "active": 3.0,
+        "idle": 32.0,
+        "pending": 0.0
+      },
+      "hikariTimeoutDelta": 0.0,
+      "mysql": {
+        "rowLockWaitsDelta": 33,
+        "rowLockTimeMsDelta": 147,
+        "transactionCountDelta": 2502,
+        "transactionMeanMs": 2.825,
+        "connectionsDelta": 2,
+        "cpuPercentSamples": []
+      },
+      "inventoryAudit": [
+        {
+          "tier": 9900262403,
+          "capacity": 5000,
+          "available": 4583,
+          "reserved": 417,
+          "allocated": 0,
+          "orders": 417,
+          "pendingOrders": 417,
+          "reservations": 417,
+          "reservedReservations": 417,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        },
+        {
+          "tier": 9900262404,
+          "capacity": 5000,
+          "available": 4583,
+          "reserved": 417,
+          "allocated": 0,
+          "orders": 417,
+          "pendingOrders": 417,
+          "reservations": 417,
+          "reservedReservations": 417,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        },
+        {
+          "tier": 9900262405,
+          "capacity": 5000,
+          "available": 4583,
+          "reserved": 417,
+          "allocated": 0,
+          "orders": 417,
+          "pendingOrders": 417,
+          "reservations": 417,
+          "reservedReservations": 417,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        }
+      ]
+    },
+    {
+      "run": "final-multi300",
+      "k6": {
+        "http": 1501,
+        "successfulBusinessWrites": 1501,
+        "controlledRejections": 0,
+        "businessRejections": 0,
+        "technicalFailures": 0,
+        "droppedIterations": 0,
+        "p50Ms": 8.9349,
+        "p95Ms": 38.906,
+        "p99Ms": 139.4232
+      },
+      "hikariSampleMax": {
+        "active": 2.0,
+        "idle": 32.0,
+        "pending": 0.0
+      },
+      "hikariTimeoutDelta": 0.0,
+      "mysql": {
+        "rowLockWaitsDelta": 176,
+        "rowLockTimeMsDelta": 3540,
+        "transactionCountDelta": 3002,
+        "transactionMeanMs": 3.865,
+        "connectionsDelta": 2,
+        "cpuPercentSamples": []
+      },
+      "inventoryAudit": [
+        {
+          "tier": 9900262503,
+          "capacity": 5000,
+          "available": 4499,
+          "reserved": 501,
+          "allocated": 0,
+          "orders": 501,
+          "pendingOrders": 501,
+          "reservations": 501,
+          "reservedReservations": 501,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        },
+        {
+          "tier": 9900262504,
+          "capacity": 5000,
+          "available": 4500,
+          "reserved": 500,
+          "allocated": 0,
+          "orders": 500,
+          "pendingOrders": 500,
+          "reservations": 500,
+          "reservedReservations": 500,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        },
+        {
+          "tier": 9900262505,
+          "capacity": 5000,
+          "available": 4500,
+          "reserved": 500,
+          "allocated": 0,
+          "orders": 500,
+          "pendingOrders": 500,
+          "reservations": 500,
+          "reservedReservations": 500,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        }
+      ]
+    },
+    {
+      "run": "final-multi400",
+      "k6": {
+        "http": 2000,
+        "successfulBusinessWrites": 2000,
+        "controlledRejections": 0,
+        "businessRejections": 0,
+        "technicalFailures": 0,
+        "droppedIterations": 0,
+        "p50Ms": 8.4621,
+        "p95Ms": 20.986404999999998,
+        "p99Ms": 39.598065
+      },
+      "hikariSampleMax": {
+        "active": 4.0,
+        "idle": 32.0,
+        "pending": 0.0
+      },
+      "hikariTimeoutDelta": 0.0,
+      "mysql": {
+        "rowLockWaitsDelta": 269,
+        "rowLockTimeMsDelta": 2101,
+        "transactionCountDelta": 4000,
+        "transactionMeanMs": 3.095,
+        "connectionsDelta": 2,
+        "cpuPercentSamples": []
+      },
+      "inventoryAudit": [
+        {
+          "tier": 9900262603,
+          "capacity": 5000,
+          "available": 4333,
+          "reserved": 667,
+          "allocated": 0,
+          "orders": 667,
+          "pendingOrders": 667,
+          "reservations": 667,
+          "reservedReservations": 667,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        },
+        {
+          "tier": 9900262604,
+          "capacity": 5000,
+          "available": 4333,
+          "reserved": 667,
+          "allocated": 0,
+          "orders": 667,
+          "pendingOrders": 667,
+          "reservations": 667,
+          "reservedReservations": 667,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        },
+        {
+          "tier": 9900262605,
+          "capacity": 5000,
+          "available": 4334,
+          "reserved": 666,
+          "allocated": 0,
+          "orders": 666,
+          "pendingOrders": 666,
+          "reservations": 666,
+          "reservedReservations": 666,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        }
+      ]
+    },
+    {
+      "run": "tuned-hot200",
+      "k6": {
+        "http": 1001,
+        "successfulBusinessWrites": 923,
+        "controlledRejections": 78,
+        "businessRejections": 0,
+        "technicalFailures": 0,
+        "droppedIterations": 0,
+        "p50Ms": 396.3402,
+        "p95Ms": 930.0152,
+        "p99Ms": 1188.6726
+      },
+      "hikariSampleMax": {
+        "active": 32.0,
+        "idle": 32.0,
+        "pending": 64.0
+      },
+      "hikariTimeoutDelta": 0.0,
+      "mysql": {
+        "rowLockWaitsDelta": 922,
+        "rowLockTimeMsDelta": 156160,
+        "transactionCountDelta": 1846,
+        "transactionMeanMs": 87.538,
+        "connectionsDelta": 19,
+        "cpuPercentSamples": []
+      },
+      "inventoryAudit": [
+        {
+          "tier": 9900264003,
+          "capacity": 5000,
+          "available": 4077,
+          "reserved": 923,
+          "allocated": 0,
+          "orders": 923,
+          "pendingOrders": 923,
+          "reservations": 923,
+          "reservedReservations": 923,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        },
+        {
+          "tier": 9900264004,
+          "capacity": 5000,
+          "available": 5000,
+          "reserved": 0,
+          "allocated": 0,
+          "orders": 0,
+          "pendingOrders": 0,
+          "reservations": 0,
+          "reservedReservations": 0,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        },
+        {
+          "tier": 9900264005,
+          "capacity": 5000,
+          "available": 5000,
+          "reserved": 0,
+          "allocated": 0,
+          "orders": 0,
+          "pendingOrders": 0,
+          "reservations": 0,
+          "reservedReservations": 0,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        }
+      ]
+    },
+    {
+      "run": "tuned-hot250",
+      "k6": {
+        "http": 1251,
+        "successfulBusinessWrites": 1026,
+        "controlledRejections": 225,
+        "businessRejections": 0,
+        "technicalFailures": 0,
+        "droppedIterations": 0,
+        "p50Ms": 334.6265,
+        "p95Ms": 887.50935,
+        "p99Ms": 1312.62615
+      },
+      "hikariSampleMax": {
+        "active": 32.0,
+        "idle": 32.0,
+        "pending": 64.0
+      },
+      "hikariTimeoutDelta": 0.0,
+      "mysql": {
+        "rowLockWaitsDelta": 1025,
+        "rowLockTimeMsDelta": 156588,
+        "transactionCountDelta": 2052,
+        "transactionMeanMs": 78.999,
+        "connectionsDelta": 2,
+        "cpuPercentSamples": []
+      },
+      "inventoryAudit": [
+        {
+          "tier": 9900264103,
+          "capacity": 5000,
+          "available": 3974,
+          "reserved": 1026,
+          "allocated": 0,
+          "orders": 1026,
+          "pendingOrders": 1026,
+          "reservations": 1026,
+          "reservedReservations": 1026,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        },
+        {
+          "tier": 9900264104,
+          "capacity": 5000,
+          "available": 5000,
+          "reserved": 0,
+          "allocated": 0,
+          "orders": 0,
+          "pendingOrders": 0,
+          "reservations": 0,
+          "reservedReservations": 0,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        },
+        {
+          "tier": 9900264105,
+          "capacity": 5000,
+          "available": 5000,
+          "reserved": 0,
+          "allocated": 0,
+          "orders": 0,
+          "pendingOrders": 0,
+          "reservations": 0,
+          "reservedReservations": 0,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        }
+      ]
+    },
+    {
+      "run": "tuned-hot300",
+      "k6": {
+        "http": 1501,
+        "successfulBusinessWrites": 994,
+        "controlledRejections": 507,
+        "businessRejections": 0,
+        "technicalFailures": 0,
+        "droppedIterations": 0,
+        "p50Ms": 329.4402,
+        "p95Ms": 866.9069,
+        "p99Ms": 1204.7374
+      },
+      "hikariSampleMax": {
+        "active": 32.0,
+        "idle": 32.0,
+        "pending": 64.0
+      },
+      "hikariTimeoutDelta": 0.0,
+      "mysql": {
+        "rowLockWaitsDelta": 993,
+        "rowLockTimeMsDelta": 159088,
+        "transactionCountDelta": 1990,
+        "transactionMeanMs": 82.69,
+        "connectionsDelta": 3,
+        "cpuPercentSamples": []
+      },
+      "inventoryAudit": [
+        {
+          "tier": 9900264203,
+          "capacity": 5000,
+          "available": 4006,
+          "reserved": 994,
+          "allocated": 0,
+          "orders": 994,
+          "pendingOrders": 994,
+          "reservations": 994,
+          "reservedReservations": 994,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        },
+        {
+          "tier": 9900264204,
+          "capacity": 5000,
+          "available": 5000,
+          "reserved": 0,
+          "allocated": 0,
+          "orders": 0,
+          "pendingOrders": 0,
+          "reservations": 0,
+          "reservedReservations": 0,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        },
+        {
+          "tier": 9900264205,
+          "capacity": 5000,
+          "available": 5000,
+          "reserved": 0,
+          "allocated": 0,
+          "orders": 0,
+          "pendingOrders": 0,
+          "reservations": 0,
+          "reservedReservations": 0,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        }
+      ]
+    },
+    {
+      "run": "tuned-hot400",
+      "k6": {
+        "http": 2001,
+        "successfulBusinessWrites": 1003,
+        "controlledRejections": 998,
+        "businessRejections": 0,
+        "technicalFailures": 0,
+        "droppedIterations": 0,
+        "p50Ms": 25.6048,
+        "p95Ms": 753.5683,
+        "p99Ms": 1185.7783
+      },
+      "hikariSampleMax": {
+        "active": 32.0,
+        "idle": 32.0,
+        "pending": 64.0
+      },
+      "hikariTimeoutDelta": 0.0,
+      "mysql": {
+        "rowLockWaitsDelta": 1002,
+        "rowLockTimeMsDelta": 161578,
+        "transactionCountDelta": 2006,
+        "transactionMeanMs": 83.262,
+        "connectionsDelta": 3,
+        "cpuPercentSamples": []
+      },
+      "inventoryAudit": [
+        {
+          "tier": 9900264303,
+          "capacity": 5000,
+          "available": 3997,
+          "reserved": 1003,
+          "allocated": 0,
+          "orders": 1003,
+          "pendingOrders": 1003,
+          "reservations": 1003,
+          "reservedReservations": 1003,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        },
+        {
+          "tier": 9900264304,
+          "capacity": 5000,
+          "available": 5000,
+          "reserved": 0,
+          "allocated": 0,
+          "orders": 0,
+          "pendingOrders": 0,
+          "reservations": 0,
+          "reservedReservations": 0,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        },
+        {
+          "tier": 9900264305,
+          "capacity": 5000,
+          "available": 5000,
+          "reserved": 0,
+          "allocated": 0,
+          "orders": 0,
+          "pendingOrders": 0,
+          "reservations": 0,
+          "reservedReservations": 0,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        }
+      ]
+    },
+    {
+      "run": "tuned-multi400",
+      "k6": {
+        "http": 2001,
+        "successfulBusinessWrites": 2001,
+        "controlledRejections": 0,
+        "businessRejections": 0,
+        "technicalFailures": 0,
+        "droppedIterations": 0,
+        "p50Ms": 8.9419,
+        "p95Ms": 16.8441,
+        "p99Ms": 22.5769
+      },
+      "hikariSampleMax": {
+        "active": 6.0,
+        "idle": 32.0,
+        "pending": 0.0
+      },
+      "hikariTimeoutDelta": 0.0,
+      "mysql": {
+        "rowLockWaitsDelta": 269,
+        "rowLockTimeMsDelta": 1076,
+        "transactionCountDelta": 4002,
+        "transactionMeanMs": 2.975,
+        "connectionsDelta": 3,
+        "cpuPercentSamples": []
+      },
+      "inventoryAudit": [
+        {
+          "tier": 9900264403,
+          "capacity": 5000,
+          "available": 4333,
+          "reserved": 667,
+          "allocated": 0,
+          "orders": 667,
+          "pendingOrders": 667,
+          "reservations": 667,
+          "reservedReservations": 667,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        },
+        {
+          "tier": 9900264404,
+          "capacity": 5000,
+          "available": 4333,
+          "reserved": 667,
+          "allocated": 0,
+          "orders": 667,
+          "pendingOrders": 667,
+          "reservations": 667,
+          "reservedReservations": 667,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        },
+        {
+          "tier": 9900264405,
+          "capacity": 5000,
+          "available": 4333,
+          "reserved": 667,
+          "allocated": 0,
+          "orders": 667,
+          "pendingOrders": 667,
+          "reservations": 667,
+          "reservedReservations": 667,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        }
+      ]
+    },
+    {
+      "run": "stable-hot150",
+      "k6": {
+        "http": 751,
+        "successfulBusinessWrites": 751,
+        "controlledRejections": 0,
+        "businessRejections": 0,
+        "technicalFailures": 0,
+        "droppedIterations": 0,
+        "p50Ms": 15.0708,
+        "p95Ms": 317.5621,
+        "p99Ms": 410.57815
+      },
+      "hikariSampleMax": {
+        "active": 30.0,
+        "idle": 32.0,
+        "pending": 8.0
+      },
+      "hikariTimeoutDelta": 0.0,
+      "mysql": {
+        "rowLockWaitsDelta": 422,
+        "rowLockTimeMsDelta": 43197,
+        "transactionCountDelta": 1502,
+        "transactionMeanMs": 31.498,
+        "connectionsDelta": 19,
+        "cpuPercentSamples": [
+          31.93,
+          24.2,
+          4.41
+        ]
+      },
+      "inventoryAudit": [
+        {
+          "tier": 9900265003,
+          "capacity": 5000,
+          "available": 4249,
+          "reserved": 751,
+          "allocated": 0,
+          "orders": 751,
+          "pendingOrders": 751,
+          "reservations": 751,
+          "reservedReservations": 751,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        },
+        {
+          "tier": 9900265004,
+          "capacity": 5000,
+          "available": 5000,
+          "reserved": 0,
+          "allocated": 0,
+          "orders": 0,
+          "pendingOrders": 0,
+          "reservations": 0,
+          "reservedReservations": 0,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        },
+        {
+          "tier": 9900265005,
+          "capacity": 5000,
+          "available": 5000,
+          "reserved": 0,
+          "allocated": 0,
+          "orders": 0,
+          "pendingOrders": 0,
+          "reservations": 0,
+          "reservedReservations": 0,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        }
+      ]
+    },
+    {
+      "run": "stable-hot150repeat",
+      "k6": {
+        "http": 750,
+        "successfulBusinessWrites": 750,
+        "controlledRejections": 0,
+        "businessRejections": 0,
+        "technicalFailures": 0,
+        "droppedIterations": 0,
+        "p50Ms": 9.629950000000001,
+        "p95Ms": 15.150589999999992,
+        "p99Ms": 20.374092999999988
+      },
+      "hikariSampleMax": {
+        "active": 1.0,
+        "idle": 32.0,
+        "pending": 0.0
+      },
+      "hikariTimeoutDelta": 0.0,
+      "mysql": {
+        "rowLockWaitsDelta": 122,
+        "rowLockTimeMsDelta": 314,
+        "transactionCountDelta": 1500,
+        "transactionMeanMs": 2.893,
+        "connectionsDelta": 3,
+        "cpuPercentSamples": [
+          22.97,
+          26.62,
+          0.35
+        ]
+      },
+      "inventoryAudit": [
+        {
+          "tier": 9900265103,
+          "capacity": 5000,
+          "available": 4250,
+          "reserved": 750,
+          "allocated": 0,
+          "orders": 750,
+          "pendingOrders": 750,
+          "reservations": 750,
+          "reservedReservations": 750,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        },
+        {
+          "tier": 9900265104,
+          "capacity": 5000,
+          "available": 5000,
+          "reserved": 0,
+          "allocated": 0,
+          "orders": 0,
+          "pendingOrders": 0,
+          "reservations": 0,
+          "reservedReservations": 0,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        },
+        {
+          "tier": 9900265105,
+          "capacity": 5000,
+          "available": 5000,
+          "reserved": 0,
+          "allocated": 0,
+          "orders": 0,
+          "pendingOrders": 0,
+          "reservations": 0,
+          "reservedReservations": 0,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        }
+      ]
+    },
+    {
+      "run": "stable-hot180",
+      "k6": {
+        "http": 900,
+        "successfulBusinessWrites": 900,
+        "controlledRejections": 0,
+        "businessRejections": 0,
+        "technicalFailures": 0,
+        "droppedIterations": 0,
+        "p50Ms": 9.75125,
+        "p95Ms": 27.512394999999998,
+        "p99Ms": 29.084336
+      },
+      "hikariSampleMax": {
+        "active": 4.0,
+        "idle": 32.0,
+        "pending": 0.0
+      },
+      "hikariTimeoutDelta": 0.0,
+      "mysql": {
+        "rowLockWaitsDelta": 444,
+        "rowLockTimeMsDelta": 3303,
+        "transactionCountDelta": 1802,
+        "transactionMeanMs": 4.335,
+        "connectionsDelta": 2,
+        "cpuPercentSamples": [
+          27.83,
+          25.22,
+          0.35
+        ]
+      },
+      "inventoryAudit": [
+        {
+          "tier": 9900265203,
+          "capacity": 5000,
+          "available": 4100,
+          "reserved": 900,
+          "allocated": 0,
+          "orders": 900,
+          "pendingOrders": 900,
+          "reservations": 900,
+          "reservedReservations": 900,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        },
+        {
+          "tier": 9900265204,
+          "capacity": 5000,
+          "available": 5000,
+          "reserved": 0,
+          "allocated": 0,
+          "orders": 0,
+          "pendingOrders": 0,
+          "reservations": 0,
+          "reservedReservations": 0,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        },
+        {
+          "tier": 9900265205,
+          "capacity": 5000,
+          "available": 5000,
+          "reserved": 0,
+          "allocated": 0,
+          "orders": 0,
+          "pendingOrders": 0,
+          "reservations": 0,
+          "reservedReservations": 0,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        }
+      ]
+    },
+    {
+      "run": "stable-hot200",
+      "k6": {
+        "http": 1000,
+        "successfulBusinessWrites": 977,
+        "controlledRejections": 23,
+        "businessRejections": 0,
+        "technicalFailures": 0,
+        "droppedIterations": 0,
+        "p50Ms": 190.84395,
+        "p95Ms": 303.475395,
+        "p99Ms": 363.7488829999999
+      },
+      "hikariSampleMax": {
+        "active": 32.0,
+        "idle": 32.0,
+        "pending": 16.0
+      },
+      "hikariTimeoutDelta": 0.0,
+      "mysql": {
+        "rowLockWaitsDelta": 962,
+        "rowLockTimeMsDelta": 115804,
+        "transactionCountDelta": 1954,
+        "transactionMeanMs": 61.948,
+        "connectionsDelta": 3,
+        "cpuPercentSamples": [
+          29.3,
+          29.76,
+          0.35
+        ]
+      },
+      "inventoryAudit": [
+        {
+          "tier": 9900265303,
+          "capacity": 5000,
+          "available": 4023,
+          "reserved": 977,
+          "allocated": 0,
+          "orders": 977,
+          "pendingOrders": 977,
+          "reservations": 977,
+          "reservedReservations": 977,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        },
+        {
+          "tier": 9900265304,
+          "capacity": 5000,
+          "available": 5000,
+          "reserved": 0,
+          "allocated": 0,
+          "orders": 0,
+          "pendingOrders": 0,
+          "reservations": 0,
+          "reservedReservations": 0,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        },
+        {
+          "tier": 9900265305,
+          "capacity": 5000,
+          "available": 5000,
+          "reserved": 0,
+          "allocated": 0,
+          "orders": 0,
+          "pendingOrders": 0,
+          "reservations": 0,
+          "reservedReservations": 0,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        }
+      ]
+    },
+    {
+      "run": "stable-multi500",
+      "k6": {
+        "http": 2501,
+        "successfulBusinessWrites": 2501,
+        "controlledRejections": 0,
+        "businessRejections": 0,
+        "technicalFailures": 0,
+        "droppedIterations": 0,
+        "p50Ms": 8.7222,
+        "p95Ms": 21.3924,
+        "p99Ms": 30.3047
+      },
+      "hikariSampleMax": {
+        "active": 4.0,
+        "idle": 32.0,
+        "pending": 0.0
+      },
+      "hikariTimeoutDelta": 0.0,
+      "mysql": {
+        "rowLockWaitsDelta": 485,
+        "rowLockTimeMsDelta": 2905,
+        "transactionCountDelta": 5002,
+        "transactionMeanMs": 3.114,
+        "connectionsDelta": 3,
+        "cpuPercentSamples": [
+          57.71,
+          57.72,
+          2.88
+        ]
+      },
+      "inventoryAudit": [
+        {
+          "tier": 9900265403,
+          "capacity": 5000,
+          "available": 4166,
+          "reserved": 834,
+          "allocated": 0,
+          "orders": 834,
+          "pendingOrders": 834,
+          "reservations": 834,
+          "reservedReservations": 834,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        },
+        {
+          "tier": 9900265404,
+          "capacity": 5000,
+          "available": 4166,
+          "reserved": 834,
+          "allocated": 0,
+          "orders": 834,
+          "pendingOrders": 834,
+          "reservations": 834,
+          "reservedReservations": 834,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        },
+        {
+          "tier": 9900265405,
+          "capacity": 5000,
+          "available": 4167,
+          "reserved": 833,
+          "allocated": 0,
+          "orders": 833,
+          "pendingOrders": 833,
+          "reservations": 833,
+          "reservedReservations": 833,
+          "conserved": 1,
+          "nonnegative": 1,
+          "orderReservationMatch": 1,
+          "uniqueBuyers": 1
+        }
+      ]
+    }
+  ]
+}

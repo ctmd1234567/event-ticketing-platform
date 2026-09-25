@@ -1,0 +1,10 @@
+tier_id	capacity	available	reserved	allocated	orders	pending_orders	reservations	reserved_reservations	conserved	nonnegative	order_reservation_match	unique_buyers
+9900126003	300	13	287	0	287	287	287	287	1	1	1	1
+9900126004	300	14	286	0	286	286	286	286	1	1	1	1
+9900126005	300	14	286	0	286	286	286	286	1	1	1	1
+legacy_requests
+34092
+legacy_orders
+34092
+legacy_outbox
+34092

@@ -2,15 +2,13 @@
 
 Date: 2026-09-16
 
-This document describes the implemented V1 payment, recovery, callback, and
-late-charge compensation boundaries. Current commands, results, and limitations
-are recorded in the [V1 verification record](../verification/V1-VERIFICATION.md).
+This document describes the implemented payment, recovery, callback, full refund and late-charge compensation boundaries. See [Reliability](../engineering/RELIABILITY.md) and [Testing](../engineering/TESTING.md) for current evidence.
 
 ## Scope and invariants
 
 - One simulated provider, CNY integer fen, one ticket per order. Zero-price
   orders remain supported because the existing catalog permits them.
-- One logical payment per order in V1. Repeated attempts reuse its payment
+- One logical payment per order. Repeated attempts reuse its payment
   number; a different idempotency key cannot create another charge for the order.
 - Payment success is immutable. Refunds are separate records.
 - Closing an order does not prove the provider canceled or failed its payment.
@@ -22,15 +20,14 @@ are recorded in the [V1 verification record](../verification/V1-VERIFICATION.md)
 - Compensation never updates inventory or reservation state. The released ticket
   may already belong to another buyer.
 - `available + reserved + allocated = capacity`; each counter is nonnegative.
-- User-requested refunds, Event notifications/MQ, and generalized reconciliation
-  remain outside V1.
+- User full refunds and targeted reconciliation use the same payment and recovery boundaries. Event notification messaging remains a separate side effect.
 
-## V6 storage contract
+## Payment storage contract
 
 Use InnoDB, BIGINT identifiers and integer-fen amounts, UTC timestamps, explicit
 foreign keys within each boundary, and database CHECK constraints for states,
 nonnegative amounts, and CNY. Opaque numbers, keys, signatures, and hashes use
-case-sensitive ASCII comparison. Do not edit V1–V5.
+case-sensitive ASCII comparison. Published Flyway migrations remain immutable.
 
 ### et_payment
 
@@ -56,7 +53,7 @@ case-sensitive ASCII comparison. Do not edit V1–V5.
 - Unique: `refund_number`, `payment_id`, and non-null `provider_refund_id` for
   the single simulated provider. `payment_id` references `et_payment.id`.
 - Ownership/order association is derived through payment, avoiding another
-  independently mutable order reference. V1 permits only one full refund per
+  independently mutable order reference. The product permits only one full refund per
   payment, even if callers use different retry or callback IDs.
 
 ### et_payment_callback
@@ -96,7 +93,7 @@ case-sensitive ASCII comparison. Do not edit V1–V5.
   `provider_refund_id`, timestamps.
 - Business numbers are primary/unique keys; provider IDs are unique. Refund has
   a unique `payment_number` and references the gateway payment, enforcing one
-  full reversal per successful charge in V1.
+  full reversal per successful charge.
 - No foreign keys to local order/payment/refund tables and no access to their
   state. Validate refund amount against the gateway's successful payment.
 - Both support `PROCESSING`, `SUCCEEDED`, `FAILED`. Terminal success is immutable;
@@ -226,8 +223,7 @@ Implemented routes, following the existing response envelope:
 
 Refresh queries may apply new trusted evidence but cannot silently restart an
 exhausted command budget. Administrative retry first queries existing results;
-it cannot mark success manually. Other users receive 404. No user-facing gateway
-fault switches, refund-create endpoint, or global response-envelope rewrite.
+it cannot mark success manually. Other users receive 404. There are no user-facing gateway fault switches or global response-envelope rewrites. The owned full-refund create route is documented in the API contract.
 
 ## Implementation and verification
 

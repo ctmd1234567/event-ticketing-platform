@@ -11,7 +11,7 @@
     <groupId>com.eventplatform</groupId>
     <artifactId>event-trading-platform</artifactId>
     <version>0.0.1-SNAPSHOT</version>
-    <name>event-trading-platform</name>
+    <name>Event Ticketing Platform</name>
     <description>Transactional event trading backend with deterministic payment and inventory recovery</description>
     <properties>
         <test.excludedGroups>manual</test.excludedGroups>

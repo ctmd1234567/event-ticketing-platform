@@ -58,7 +58,7 @@ abstract class PaymentServiceContract {
         manager = new DataSourceTransactionManager(source);
         local = new TransactionTemplate(manager);
         notificationOutbox = new EventNotificationOutbox(db, new ObjectMapper());
-        orders = new EventOrderService(db, manager, notificationOutbox, 900, 30,
+        orders = new EventOrderService(db, manager, notificationOutbox, 900, 30, 48,
                 new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
         faults = new GatewayResponseFaultInjector("NONE");
         gateway = spy(new JdbcSimulatedPaymentGateway(db, manager,

@@ -1,0 +1,12 @@
+2026-09-25T00:25:55+08:00
+ Container event-trading-platform-redis-1 Stopping
+ Container event-trading-platform-redis-1 Stopped
+2026-09-25T00:25:55+08:00
+{"success":false,"errorMsg":"Authentication service is temporarily unavailable"}
+down_http=503
+ Container event-trading-platform-redis-1 Starting
+ Container event-trading-platform-redis-1 Started
+2026-09-25T00:25:59+08:00
+{"success":true,"data":{"id":2103159021258973186,"orderNumber":"EO2103159021258973186","userId":9900072000,"eventId":9900130001,"sessionId":9900130002,"ticketTierId":9900130003,"quantity":1,"unitPrice":8800,"totalAmount":8800,"currency":"CNY","status":"PENDING_PAYMENT","paymentDeadline":"2026-09-24T16:41:00Z","createdAt":"2026-09-24T16:26:00Z"}}
+up_http=200
+2026-09-25T00:26:00+08:00

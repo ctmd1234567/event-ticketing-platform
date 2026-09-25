@@ -5,10 +5,8 @@
 - State transitions are commands, not arbitrary field updates.
 - Every transition verifies the current state with a conditional update or row lock.
 - Repeating a completed transition is a no-op that returns the committed result.
-- An invalid transition returns `409 Conflict` with a stable business error code.
-- State and its applicable history change in one transaction. Where a transition
-  defines an Outbox event, that event must join the same transaction; item 6 does
-  not yet emit new payment/refund Outbox events.
+- Invalid transitions are rejected; the API does not expose a stable machine error-code field.
+- State and its applicable history change in one transaction. Order payment confirmation and closure include their notification Outbox intent in the same transaction.
 - Consumers and callbacks may arrive more than once or out of order.
 
 ## Event
@@ -42,9 +40,7 @@ stateDiagram-v2
 
 Rules:
 
-- V1 implements `PENDING_PAYMENT -> PAID` and `PENDING_PAYMENT -> CLOSED`.
-  Item 10 adds user-requested `PAID`/`FULFILLED -> REFUNDING -> REFUNDED`.
-  Fulfillment itself remains later scope.
+- Payment and closure determine the pending order outcome. User full refund moves an eligible paid order through `REFUNDING` to `REFUNDED`. `FULFILLED` is represented in the model, but no separate fulfillment command is implemented.
 - `PENDING_PAYMENT` owns a `RESERVED` inventory reservation.
 - `PAID` and `FULFILLED` own a `CONFIRMED` reservation.
 - `CLOSED` owns a `RELEASED` reservation; `closeReason` distinguishes cancellation from expiration.
@@ -75,7 +71,7 @@ Rules:
 - Unknown callbacks are stored for reconciliation instead of discarded.
 - Transport timeout, HTTP 500, or connection reset produces `UNKNOWN`, not `FAILED`.
 - Payment success updates payment, order, reservation, inventory, and payment
-  history atomically. Payment/refund Outbox events remain a later increment.
+  history atomically. A successful order transition writes its notification Outbox intent in the same local transaction.
 
 ## Refund
 
@@ -92,8 +88,7 @@ stateDiagram-v2
 Rules:
 
 - `SUCCEEDED` is terminal.
-- V1 creates late-payment compensation refunds. Item 10 adds user-requested full
-  refunds; each payment has at most one refund, and gateway retries reuse its refund number.
+- Late-payment compensation and user-requested full refunds share the same recovery path. Each payment has at most one refund, and gateway retries reuse its refund number.
   Operator retry idempotency is audited separately.
 - Late-payment compensation leaves the order `CLOSED`. A successful user refund
   changes `REFUNDING` to `REFUNDED` in the same transaction as the local refund result.
@@ -129,4 +124,4 @@ stateDiagram-v2
 
 ### Duplicate or out-of-order messages
 
-Consumers claim `(consumerName, messageId)` in the Inbox table in the same transaction as the business effect. Completed messages are acknowledged as duplicates. Valid but premature messages remain retryable or enter reconciliation; they never force an illegal transition.
+The notification consumer uses unique `et_notification.event_id` in the same transaction as its in-app effect. A duplicate commits no second effect and is acknowledged. Failed deliveries are recorded and can enter the DLQ for reviewed redrive.

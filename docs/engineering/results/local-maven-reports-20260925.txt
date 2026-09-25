@@ -1,0 +1,10 @@
+2026-09-25 local verification: Windows Java 21.0.7, Maven 3.9.16.
+Merged main command: mvn -Pinfrastructure verify. Exit 0. This run includes Surefire and Failsafe.
+
+Surefire: 15 suites, 65 tests, 0 failures, 0 errors, 0 skipped.
+ApplicationConfigurationBindingTest 1; AuthCodesTest 3; EventCatalogServiceTest 3; EventNotificationControllerTest 1; EventOrderControllerTest 1; EventOrderServiceTest 8; LogoutControllerTest 1; PaymentCallbackControllerTest 2; PaymentControllerTest 1; PaymentRecoveryAdminControllerTest 1; RequestIdFilterTest 1; RequestLimitsTest 1; SecurityRegressionTest 6; SimulatedPaymentGatewayTest 3; EventPaymentServiceTest 32.
+
+Failsafe: 5 suites, 83 tests, 0 failures, 0 errors, 0 skipped.
+EventInfrastructureIT 2; EventNotificationIT 15; EventOrderLifecycleIT 2; EventPaymentServiceIT 32; PaymentBoundaryIT 32.
+
+The final Maven infrastructure run completed with BUILD SUCCESS. Testcontainers supplied isolated MySQL and RabbitMQ. These are local test results, not a claim about hosted CI.

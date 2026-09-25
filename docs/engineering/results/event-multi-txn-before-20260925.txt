@@ -1,0 +1,8 @@
+COUNT_STAR	SUM_TIMER_WAIT
+51736	282155643474000
+Variable_name	Value
+Innodb_row_lock_time	178905
+Innodb_row_lock_waits	7855
+Innodb_rows_updated	28819
+overdue_pending
+0
