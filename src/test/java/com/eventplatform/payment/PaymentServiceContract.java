@@ -33,7 +33,7 @@ import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
-/** Same behavioral assertions run on isolated H2 and on the real Flyway V1–V9 MySQL schema. */
+/** Same behavioral assertions run on isolated H2 and on the real Flyway MySQL schema. */
 abstract class PaymentServiceContract {
     protected abstract DataSource source() throws Exception;
     private GateJdbc db;

@@ -24,7 +24,6 @@ public class AuthCodes {
     private final String mode, endpoint, apiKey;
     private final SecureRandom random = new SecureRandom();
     private final DefaultRedisScript<Long> limit = script("rate-limit.lua");
-    private final DefaultRedisScript<Long> limits = script("rate-limits.lua");
     private final DefaultRedisScript<Long> verify = script("auth-code.lua");
     private static DefaultRedisScript<Long> script(String path) {
         DefaultRedisScript<Long> script = new DefaultRedisScript<>();
@@ -40,21 +39,6 @@ public class AuthCodes {
     }
     public void limit(String key,int max,int seconds) {
         if (!Long.valueOf(1).equals(redis.execute(limit,List.of(key),String.valueOf(max),String.valueOf(seconds))))
-            throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS,"Too many requests; try again later");
-    }
-    public void limitAll(List<String> keys, List<Integer> maxima, List<Integer> seconds) {
-        if (keys.isEmpty() || keys.size() != maxima.size() || keys.size() != seconds.size()) {
-            throw new IllegalArgumentException("Rate-limit keys, maxima and windows must have the same non-zero size");
-        }
-        List<String> arguments = new ArrayList<>(keys.size() * 2);
-        for (int index = 0; index < keys.size(); index++) {
-            if (maxima.get(index) < 1 || seconds.get(index) < 1) {
-                throw new IllegalArgumentException("Rate-limit maxima and windows must be positive");
-            }
-            arguments.add(String.valueOf(maxima.get(index)));
-            arguments.add(String.valueOf(seconds.get(index)));
-        }
-        if (!Long.valueOf(1).equals(redis.execute(limits, keys, arguments.toArray())))
             throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS,"Too many requests; try again later");
     }
     public Result send(String phone) {

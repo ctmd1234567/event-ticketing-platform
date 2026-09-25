@@ -115,17 +115,6 @@ app:
     mode: ${SMS_MODE:disabled}
     endpoint: ${SMS_ENDPOINT:}
     api-key: ${SMS_API_KEY:}
-  order:
-    stock-bucket-count: ${ORDER_STOCK_BUCKET_COUNT:16}
-    max-in-flight: ${ORDER_MAX_IN_FLIGHT:24}
-    admission-wait-ms: ${ORDER_ADMISSION_WAIT_MS:100}
-    rate-limit:
-      user-max: ${ORDER_USER_RATE_MAX:10}
-      user-window-seconds: ${ORDER_USER_RATE_WINDOW_SECONDS:10}
-      voucher-max: ${ORDER_VOUCHER_RATE_MAX:420}
-      voucher-window-seconds: ${ORDER_VOUCHER_RATE_WINDOW_SECONDS:1}
-      global-max: ${ORDER_GLOBAL_RATE_MAX:800}
-      global-window-seconds: ${ORDER_GLOBAL_RATE_WINDOW_SECONDS:1}
   event-notifications:
     # Broker outage never blocks transaction commits; intents remain in MySQL.
     enabled: ${EVENT_NOTIFICATIONS_ENABLED:true}
@@ -134,9 +123,3 @@ app:
     lease-seconds: ${EVENT_NOTIFICATIONS_LEASE_SECONDS:30}
     max-attempts: ${EVENT_NOTIFICATIONS_MAX_ATTEMPTS:8}
     confirm-timeout-seconds: ${EVENT_NOTIFICATIONS_CONFIRM_TIMEOUT_SECONDS:5}
-  outbox:
-    enabled: false
-    interval-ms: ${OUTBOX_INTERVAL_MS:50}
-    batch-size: ${OUTBOX_BATCH_SIZE:500}
-    lease-seconds: ${OUTBOX_LEASE_SECONDS:60}
-    confirm-timeout-seconds: ${OUTBOX_CONFIRM_TIMEOUT_SECONDS:5}

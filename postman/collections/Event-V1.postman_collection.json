@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "Event Trading Platform - V1",
-    "description": "Callable default-product Event V1 requests. Run with the Local environment and the application local profile. ADMIN_USER_IDS must include the user represented by admin_token. RabbitMQ and legacy-experiment are not used.",
+    "description": "Callable default-product Event V1 requests. Run with the Local environment and the application local profile. ADMIN_USER_IDS must include the user represented by admin_token. This V1 request collection does not exercise notification endpoints; the default application uses RabbitMQ for Event notifications.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "event": [

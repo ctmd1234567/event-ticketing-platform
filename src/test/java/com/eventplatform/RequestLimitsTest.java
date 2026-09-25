@@ -3,22 +3,21 @@ package com.eventplatform;
 import com.eventplatform.security.AuthCodes;
 import com.eventplatform.security.RequestLimits;
 import org.junit.jupiter.api.Test;
-
-import java.util.List;
+import jakarta.servlet.http.HttpServletRequest;
 
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 class RequestLimitsTest {
-    @Test void orderAdmissionAppliesUserVoucherAndGlobalLimits() {
+    @Test void authAdmissionUsesServerObservedAddress() {
         AuthCodes codes = mock(AuthCodes.class);
-        RequestLimits limits = new RequestLimits(codes, 10, 10, 800, 1, 2000, 1);
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        when(request.getRemoteAddr()).thenReturn("127.0.0.1");
+        RequestLimits limits = new RequestLimits(codes);
 
-        limits.order(7, 42);
+        limits.auth(request);
 
-        verify(codes).limitAll(
-                List.of("order:user:{7}", "order:voucher:{42}", "order:global"),
-                List.of(10, 800, 2000),
-                List.of(10, 1, 1));
+        verify(codes).limit("auth:ip:{127.0.0.1}", 30, 60);
     }
 }

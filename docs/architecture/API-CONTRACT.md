@@ -145,4 +145,4 @@ Users access only their own orders, payments, and refunds. Another user's resour
 
 ## Optional legacy experiment
 
-When the explicit `legacy-experiment` profile is active, authenticated `/voucher-order/**` endpoints exist only to reproduce a historical JDBC/Outbox/RabbitMQ engineering experiment. They are not part of the Event product contract and must not be added to the product request collection.
+The historical `/voucher-order/**` endpoints are no longer included in the current application. The Voucher experiment remains available through repository history and its verification record; it is not part of the Event product contract.

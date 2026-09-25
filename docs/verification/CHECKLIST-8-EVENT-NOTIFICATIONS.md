@@ -5,7 +5,7 @@
 ## 实现边界
 
 - `EventOrderService.close` 真正完成 `PENDING_PAYMENT → CLOSED`、释放库存时，在同一个 MySQL 事务插入 `ORDER_CLOSED:<orderId>`。支付确认的 `allocate` 真正完成 `PENDING_PAYMENT → PAID` 时，在相同事务插入 `ORDER_PAID:<orderId>`。回滚不会留下事件；重复关单、重复支付不会产生第二条事件。
-- V7 新增 `et_outbox_event` 和 `et_notification`，保留 V1～V6 原文件。事件类型、订单 ID、用户 ID 与 JSON payload 持久化；`event_id` 与 `(event_type, aggregate_id)` 均唯一。消费者只写站内通知，绝不创建 Event 订单或动库存。旧 `tb_outbox_event`、Voucher Listener 与旧 Rabbit 拓扑仍受 `legacy-experiment` profile 隔离。
+- V7 新增 `et_outbox_event` 和 `et_notification`，保留 V1～V6 原文件。事件类型、订单 ID、用户 ID 与 JSON payload 持久化；`event_id` 与 `(event_type, aggregate_id)` 均唯一。消费者只写站内通知，绝不创建 Event 订单或动库存。第 12 项移除了旧 Voucher Listener 和 Rabbit 拓扑的运行代码，V10 将旧 `tb_outbox_event` 改名归档。
 - 默认启用 Event 通知运行时。`EventNotificationPublisher` 在一次扫描中逐条原子领取 `PENDING` 或租约到期的 `PROCESSING`，避免等待前一条 Confirm 时让尚未发送的事件过租约。业务 `event_id` 稳定，每次发送使用新的 Confirm 关联 ID；等待 correlated Confirm，并拒绝 mandatory Return、NACK、超时和未知结果。扫描发送前声明预期的持久 exchange、queue、binding；旧 Broker 上的拓扑参数冲突会失败，不把 ACK 当成预期队列已收到消息。
 - 失败按尝试次数退避，最多 8 次，之后停在 `MANUAL_REQUIRED`。领取后进程崩溃由 `lease_until` 回收；Broker 已接收但本地未标记 `PUBLISHED` 时可能重复发布。`et_notification.event_id` 唯一，消费者在通知事务提交后由容器 AUTO ACK。`PUBLISHED` 仅表示发布侧确认，不表示站内通知已写入。
 - 登录用户可调用 `GET /api/v1/notifications` 查询自己的最近 100 条通知。单 Broker 使用 Compose `rabbit-data` 持久卷及持久化队列/消息；不承诺集群 HA。

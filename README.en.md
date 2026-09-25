@@ -9,7 +9,7 @@
 [![Java 21](https://img.shields.io/badge/Java-21-E76F00?logo=openjdk&logoColor=white)](https://openjdk.org/projects/jdk/21/)
 [![Spring Boot 3.5](https://img.shields.io/badge/Spring%20Boot-3.5.16-6DB33F?logo=springboot&logoColor=white)](https://spring.io/projects/spring-boot)
 [![MySQL 8.4](https://img.shields.io/badge/MySQL-8.4-4479A1?logo=mysql&logoColor=white)](https://www.mysql.com/)
-[![Tests](https://img.shields.io/badge/verification-123%20tests%20passed-2EA44F)](#verification-evidence)
+[![Tests](https://img.shields.io/badge/verification-147%20tests%20passed-2EA44F)](#verification-evidence)
 [![CI](https://github.com/ctmd1234567/event-trading-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/ctmd1234567/event-trading-platform/actions/workflows/ci.yml)
 
 [中文](README.md) · [Domain model](docs/architecture/DOMAIN-MODEL.md) · [State machines](docs/architecture/STATE-MACHINES.md) · [API contract](docs/architecture/API-CONTRACT.md) · [V1 verification](docs/verification/V1-VERIFICATION.md)
@@ -46,7 +46,7 @@ flowchart LR
     Security <--> Redis[(Redis 7.4)]
 ```
 
-The core Event trade remains a synchronous MySQL transaction. Payment success and order closure persist notification intent in that transaction. RabbitMQ carries only this side effect and never creates core orders. Item 9 adds broker outage recovery, bounded consumer retry, a DLQ, and audited admin redrive. The old Voucher messaging experiment remains profile-isolated.
+The core Event trade remains a synchronous MySQL transaction. Payment success and order closure persist notification intent in that transaction. RabbitMQ carries only this side effect and never creates core orders. Item 9 adds broker outage recovery, bounded consumer retry, a DLQ, and audited admin redrive. The old Voucher experiment has left the current application; its source and reproduction materials remain in Git history.
 
 ## Core business flow
 
@@ -88,14 +88,14 @@ Frozen V1 rules: one ticket per order, integer-fen CNY, one order per user and t
 
 ## Verification evidence
 
-On 2026-09-19, the current V1 candidate was verified with Microsoft OpenJDK 21.0.7 and Maven 3.9.16:
+On 2026-09-19, a V1 candidate was verified with Microsoft OpenJDK 21.0.7 and Maven 3.9.16 (historical result):
 
 - **65 default tests** covering identity, security, Event, inventory transactions, payment services, controllers, and the simulated gateway
 - **58 infrastructure-profile integration tests**: 57 cover Event V1, plus one isolated historical RabbitMQ experiment test
 - **123 tests in total** with zero failures, errors, or skips; `mvn -Pinfrastructure verify` runs both the default and Testcontainers integration suites
 - **Event order baseline**: 200 authenticated `POST /api/v1/orders` calls produced 100 successes, 100 explicit business conflicts, zero technical failures, and zero dropped attempts; P50/P95/P99 were 0.012996/0.040840/0.048521 seconds and all inventory and relationship audits passed
 
-See the [V1 verification record](docs/verification/V1-VERIFICATION.md) and [Event order baseline result](docs/verification/results/event-order-creation-baseline-20260919.md) for commands, Demo evidence, versions, database audits, boundaries, and limitations. Flyway 11.7.2 still reports a certification warning for MySQL 8.4; migrations and assertions passed, but that is not a production compatibility certification.
+The integrated V2 version passed `clean test` and `clean -Pinfrastructure verify` on 2026-09-25 with Java 21.0.7 and Maven 3.9.16: 64 default tests and 83 Testcontainers integration tests, 147 total, with no failures, errors, or skips. Fresh Surefire/Failsafe XML reports passed the required-suite gate. See the [item 12 acceptance record](docs/verification/CHECKLIST-12-V2-ACCEPTANCE.md). The [historical V1 record](docs/verification/V1-VERIFICATION.md) and [Event order baseline](docs/verification/results/event-order-creation-baseline-20260919.md) provide the earlier commands, Demo, audits, and limits. Flyway 11.7.2 still reports a certification warning for MySQL 8.4; migrations and assertions passed, but that is not a production compatibility certification.
 
 ## Run
 
@@ -173,13 +173,13 @@ src/main/java/com/eventplatform/
 ├── catalog/       Event, Session, TicketTier
 ├── controller/    Event, Order, Payment, Identity, Notification APIs
 ├── notification/  Event Outbox, RabbitMQ publisher/consumer, in-app reads
-├── order/         Synchronous ordering and expiry; isolated historical experiment
+├── order/         Synchronous ordering, inventory, and expiry
 ├── payment/       Gateway boundary, callbacks, UNKNOWN recovery, full refunds and reconciliation
 ├── security/      Tokens, codes, authorization, rate limiting
 ├── service/       Minimal identity service
-└── config/        Security, MyBatis, experimental Rabbit configuration
+└── config/        Security, MyBatis, and Event notification configuration
 
-src/main/resources/db/migration/   Flyway V1–V6 preserved; V7–V9 are forward migrations
+src/main/resources/db/migration/   Flyway V1–V6 preserved; V7–V10 are forward migrations
 src/test/                         unit, concurrency, and Testcontainers acceptance
 docs/                             architecture, state machines, API, evidence
 postman/                          Event V1 collection and local environment
@@ -189,17 +189,17 @@ loadtest/                         Event baseline, bounded item 11 load, and isol
 
 ## Current boundary and roadmap
 
-- Complete now: V1 Core Trading; see the [V1 verification record](docs/verification/V1-VERIFICATION.md)
+- Complete now: V1 Core Trading and V2 items 8–12; see the acceptance records below
 - V2 item 8: Event Notification Outbox/MQ and in-app notifications; see the [item 8 record](docs/verification/CHECKLIST-8-EVENT-NOTIFICATIONS.md)
 - V2 item 9: broker outage recovery, notification DLQ, and audited admin redrive; see the [item 9 record](docs/verification/CHECKLIST-9-MQ-RECOVERY.md)
 - V2 item 10: full user refunds and targeted reconciliation; see the [item 10 record](docs/verification/CHECKLIST-10-REFUND-RECONCILIATION.md)
 - V2 item 11: Event SQL plans, Normal/Stress/Spike and multi-tier load, and dependency-failure evidence; see the [item 11 record](docs/verification/CHECKLIST-11-SQL-LOAD-DEPENDENCIES.md) for results and limits. This measured envelope did not justify admission control or stock buckets.
-- V2 item 12: engineering cleanup and final main-version acceptance remain
+- V2 item 12: retired experiment runtime, data-preserving migration, and engineering acceptance; see the [item 12 record](docs/verification/CHECKLIST-12-V2-ACCEPTANCE.md) and [experiment archive](docs/history/LEGACY-VOUCHER-ARCHIVE.md)
 - V3: optional soak, alerting, and backup/recovery evidence; not a completion gate
 
 Not implemented: SSE delivery, generalized reconciliation, and complete OpenAPI. Authenticated users can query their latest 100 notifications with `GET /api/v1/notifications`; admins can redrive after investigating the cause. A DLQ and single-node persistence are not a zero-loss guarantee.
 
-High-throughput engineering experiment (isolated Voucher/Outbox/RabbitMQ write path, including the failed cold-start round, limitations, and raw evidence): [1,500 RPS experiment record](docs/verification/CONCURRENCY-EXPERIMENT-1500-RPS-2026-09-18.md). It is not an Event performance result, production SLA, or long-run stability claim.
+Historical high-throughput engineering experiment (older Voucher/Outbox/RabbitMQ write path, including the failed cold-start round, limitations, and raw evidence): [1,500 RPS experiment record](docs/verification/CONCURRENCY-EXPERIMENT-1500-RPS-2026-09-18.md). It is not an Event performance result, production SLA, or long-run stability claim.
 
 ## Design documents
 

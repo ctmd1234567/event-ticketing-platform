@@ -70,15 +70,16 @@ class EventInfrastructureIT {
     @Autowired
     Flyway flyway;
 
-    @Autowired
-    org.springframework.context.ApplicationContext context;
-
     @DirtiesContext(methodMode = DirtiesContext.MethodMode.AFTER_METHOD)
     @Test
     void realFlywayMySqlAndEventOrderRoundTrip() {
         assertThat(flyway.info().applied())
                 .extracting(info -> info.getVersion().getVersion())
-                .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9");
+                .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10");
+        assertThat(db.queryForObject("""
+                SELECT COUNT(*) FROM information_schema.tables
+                WHERE table_schema=DATABASE() AND table_name LIKE 'archive_legacy_%'
+                """, Integer.class)).isEqualTo(6);
 
         new ResourceDatabasePopulator(new ClassPathResource("db/event-infrastructure-seed.sql"))
                 .execute(source);
@@ -96,18 +97,6 @@ class EventInfrastructureIT {
                 .containsEntry("available", 1)
                 .containsEntry("reserved", 1)
                 .containsEntry("allocated", 0);
-    }
-
-    @Test
-    void defaultProductContextDoesNotCreateLegacyOrderProcessingBeans() {
-        assertThat(context.getBeansOfType(com.eventplatform.controller.VoucherOrderController.class)).isEmpty();
-        assertThat(context.getBeansOfType(com.eventplatform.order.OrderTransactions.class)).isEmpty();
-        assertThat(context.getBeansOfType(com.eventplatform.order.OrderPerformance.class)).isEmpty();
-        assertThat(context.getBeansOfType(com.eventplatform.order.OutboxPublisher.class)).isEmpty();
-        assertThat(context.getBeansOfType(com.eventplatform.order.OutboxMetrics.class)).isEmpty();
-        assertThat(context.getBeansOfType(com.eventplatform.config.QueueConfig.class)).isEmpty();
-        assertThat(context.getBeansOfType(com.eventplatform.listener.SeckillVoucherListener.class)).isEmpty();
-        assertThat(context.getBeansOfType(EventOrderService.class)).hasSize(1);
     }
 
     @DirtiesContext(methodMode = DirtiesContext.MethodMode.AFTER_METHOD)
